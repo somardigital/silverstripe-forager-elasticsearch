@@ -1,0 +1,31 @@
+---
+Name: silverstripe-forager-elasticsearch
+Only:
+  envvarset: 'ELASTIC_SEARCH_API_KEY'
+After:
+  - 'search-forager-default'
+---
+SilverStripe\Core\Injector\Injector:
+  SilverStripe\Forager\Service\IndexConfiguration:
+    constructor:
+      index_variant: '`ELASTIC_SEARCH_INDEX_VARIANT`'
+  SilverStripe\Forager\Interfaces\IndexingInterface:
+    class: Somar\ForagerElasticsearch\Service\ElasticsearchService
+    constructor:
+      client: '%$Elastic\Elasticsearch\Client.managementClient'
+      configuration: '%$SilverStripe\Forager\Service\IndexConfiguration'
+      builder: '%$SilverStripe\Forager\Service\DocumentBuilder'
+  Elastic\Elasticsearch\Client.managementClient:
+    factory: Somar\ForagerElasticsearch\Service\ClientFactory
+    constructor:
+      endpoint: '`ELASTIC_SEARCH_ENDPOINT`'
+      cloud_id: '`ELASTIC_SEARCH_CLOUD_ID`'
+      api_id: '`ELASTIC_SEARCH_API_ID`'
+      api_key: '`ELASTIC_SEARCH_API_KEY`'
+      http_client: '%$GuzzleHttp\Client'
+
+## customise the dataobject fields for ElasticSearch compatability
+SilverStripe\Forager\DataObject\DataObjectDocument:
+  id_field: record_id
+  base_class_field: record_base_class
+  page_content_field: page_content

@@ -1,0 +1,48 @@
+{
+    "name": "somar/silverstripe-forager-elasticsearch",
+    "description": "Elasticsearch Search Provider for Silverstripe Forager",
+    "type": "silverstripe-vendormodule",
+    "license": "BSD-3-Clause",
+    "authors": [
+        {
+            "name": "Somar Digital",
+            "homepage": "https://www.somar.co.nz"
+        }
+    ],
+    "keywords": [
+        "Elastic",
+        "Elasticsearch",
+        "Elastic Search",
+        "Search",
+        "Silverstripe CMS"
+    ],
+    "require": {
+        "php": "^8.2",
+        "silverstripe/framework": "^5.1",
+        "silverstripe/silverstripe-forager": "^1",
+        "elasticsearch/elasticsearch": "^8.18",
+        "guzzlehttp/guzzle": "^7"
+    },
+    "require-dev": {
+        "silverstripe/recipe-testing": "^3",
+        "tractorcow/silverstripe-fluent": "^7",
+        "slevomat/coding-standard": "~8.8.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Somar\\ForagerElasticsearch\\": "src/",
+            "Somar\\ForagerElasticsearch\\Tests\\": "tests/"
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "config": {
+        "allow-plugins": {
+            "composer/installers": true,
+            "silverstripe/vendor-plugin": true,
+            "dealerdirect/phpcodesniffer-composer-installer": true,
+            "php-http/discovery": true,
+            "silverstripe/recipe-plugin": true
+        }
+    }
+}
