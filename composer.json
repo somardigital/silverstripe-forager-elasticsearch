@@ -1,5 +1,5 @@
 {
-    "name": "somar/silverstripe-forager-elasticsearch",
+    "name": "somardigital/silverstripe-forager-elasticsearch",
     "description": "Elasticsearch Search Provider for Silverstripe Forager",
     "type": "silverstripe-vendormodule",
     "license": "BSD-3-Clause",
