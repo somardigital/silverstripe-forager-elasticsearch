@@ -10,7 +10,7 @@ This module **does not** provide any method for performing searches on your engi
 
 ## Installation
 
-`composer require somar/silverstripe-forager-elasticsearch`
+`composer require somardigital/silverstripe-forager-elasticsearch`
 
 ## Activating Elasticsearch
 
