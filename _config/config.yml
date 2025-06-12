@@ -3,6 +3,7 @@ Name: silverstripe-forager-elasticsearch
 Only:
   envvarset: 'ELASTIC_SEARCH_API_KEY'
 After:
+  - 'silverstripe-forager'
   - 'search-forager-default'
 ---
 SilverStripe\Core\Injector\Injector:
