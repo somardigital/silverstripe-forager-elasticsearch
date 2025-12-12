@@ -11,7 +11,7 @@ use SilverStripe\Core\Injector\Injectable;
 use SilverStripe\Core\Injector\Injector;
 use SilverStripe\Forager\Exception\IndexConfigurationException;
 use SilverStripe\Forager\Exception\IndexingServiceException;
-use SilverStripe\Forager\Interfaces\BatchDocumentRemovalInterface;
+use SilverStripe\Forager\Interfaces\BatchDocumentInterface;
 use SilverStripe\Forager\Interfaces\DocumentInterface;
 use SilverStripe\Forager\Interfaces\IndexingInterface;
 use SilverStripe\Forager\Schema\Field;
@@ -19,7 +19,7 @@ use SilverStripe\Forager\Service\DocumentBuilder;
 use SilverStripe\Forager\Service\IndexConfiguration;
 use SilverStripe\Forager\Service\Traits\ConfigurationAware;
 
-class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInterface
+class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
 {
 
     use Configurable;
