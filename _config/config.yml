@@ -9,7 +9,7 @@ After:
 SilverStripe\Core\Injector\Injector:
   SilverStripe\Forager\Service\IndexConfiguration:
     constructor:
-      index_variant: '`ELASTIC_SEARCH_INDEX_VARIANT`'
+      indexPrefix: '`ELASTIC_SEARCH_INDEX_PREFIX`'
   SilverStripe\Forager\Interfaces\IndexingInterface:
     class: Somar\ForagerElasticsearch\Service\ElasticsearchService
     constructor:
