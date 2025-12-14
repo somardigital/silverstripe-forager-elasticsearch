@@ -94,14 +94,14 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         return $this->config()->get('max_document_size');
     }
 
-    public function addDocument(DocumentInterface $document): ?string
+    public function addDocument(string $indexSuffix, DocumentInterface $document): ?string
     {
-        $ids = $this->addDocuments([$document]);
+        $ids = $this->addDocuments($indexSuffix, [$document]);
 
         return array_shift($ids);
     }
 
-    public function addDocuments(array $documents): array
+    public function addDocuments(string $indexSuffix, array $documents): array
     {
         $documentMap = $this->getContentMapForDocuments($documents);
         $processedIds = [];
@@ -139,14 +139,14 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         return array_unique($processedIds);
     }
 
-    public function removeDocument(DocumentInterface $document): ?string
+    public function removeDocument(string $indexSuffix, DocumentInterface $document): ?string
     {
-        $ids = $this->removeDocuments([$document]);
+        $ids = $this->removeDocuments($indexSuffix, [$document]);
 
         return array_shift($ids);
     }
 
-    public function removeDocuments(array $documents): array
+    public function removeDocuments(string $indexSuffix, array $documents): array
     {
         $documentMap = [];
         $processedIds = [];
@@ -225,14 +225,14 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         return $response['deleted'] ?? 0;
     }
 
-    public function getDocument(string $id): ?DocumentInterface
+    public function getDocument(string $indexSuffix, string $id): ?DocumentInterface
     {
         $result = $this->getDocuments([$id]);
 
         return $result[0] ?? null;
     }
 
-    public function getDocuments(array $ids): array
+    public function getDocuments(string $indexSuffix, array $ids): array
     {
         $docs = [];
         $indexes = $this->getConfiguration()->getIndexes();
@@ -265,11 +265,11 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         return array_values($docs);
     }
 
-    public function listDocuments(string $indexName, ?int $pageSize = null, int $currentPage = 0): array
+    public function listDocuments(string $indexSuffix, ?int $pageSize = null, int $currentPage = 0): array
     {
         $docs = [];
         $params = [
-            'index' => $this->environmentizeIndex($indexName),
+            'index' => $this->environmentizeIndex($indexSuffix),
             'from' => $currentPage,
         ];
 
@@ -297,7 +297,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         return $docs;
     }
 
-    public function getDocumentTotal(string $indexName): int
+    public function getDocumentTotal(string $indexSuffix): int
     {
         $response = $this->getClient()->count([
             'index' => $this->environmentizeIndex($indexName),
