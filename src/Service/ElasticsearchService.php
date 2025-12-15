@@ -319,7 +319,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
 
     public function getIndexSettings(string $indexName): array
     {
-        $index = $this->getConfiguration()->getIndexes()[$indexName] ?? null;
+        $index = $this->getConfiguration()->getIndexConfigurations()[$indexName] ?? null;
 
         return $index['settings'] ?? [];
     }
@@ -329,37 +329,33 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         $indicies = $this->getClient()->indices();
         $schemas = [];
 
-        foreach (array_keys($this->getConfiguration()->getIndexes()) as $indexName) {
+        foreach (array_keys($this->getConfiguration()->getIndexConfigurations()) as $indexName) {
             $this->validateIndex($indexName);
 
             $envIndex = $this->environmentizeIndex($indexName);
             $this->findOrMakeIndex($envIndex);
 
-            // Fetch the mappings, as it currently exists in Elastic
-            // $elasticMappings = $indicies
-            //     ->getMapping(['index' => $envIndex])[$envIndex]['mappings']['properties'] ?? [];
+            $classes = $this->getConfiguration()
+                ->getIndexDataForSuffix($indexName)
+                ->getClasses();
+
+            $fields = [];
+
+            foreach ($classes as $class) {
+                $classConfig = $this->getConfiguration()
+                    ->getIndexConfigurationsForClassName($class);
+
+                $fields = array_merge(
+                    $fields,
+                    $classConfig[$indexName]['includeClasses'][$class]['fields']
+                );
+            }
 
             // Fetch the mappings, as it is currently configured in our application
-            $definedMappings = $this->getMappingsForFields(
-                $this->getConfiguration()->getFieldsForIndex($indexName)
-            );
-
-            // Fetch the settings, as it currently exists in Elastic
-            // $elasticSettings = $indicies
-            //     ->getSettings(['index' => $envIndex])[$envIndex]['settings'] ?? [];
+            $definedMappings = $this->getMappingsForFields($fields);
 
             // Fetch the settings, as it is currently configured in our application
             $definedSettings = $this->getIndexSettings($indexName);
-
-            // Check to see if there are any important differences between our mappings and settings.
-            // If there are, we'll want to update
-            // if (!$this->mappingsRequiresUpdate($definedMappings, $elasticMappings) &&
-            //     !$this->settingsRequiresUpdate($definedSettings, $elasticSettings)) {
-            //     // No updates found, add this to our tracked schemas
-            //     $schemas[$indexName] = true;
-
-            //     continue;
-            // }
 
             // Trigger an update to Elastic with our current configured mappings and settings
             try {
@@ -551,20 +547,20 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         $properties = [];
 
         /** @var Field $field */
-        foreach ($fields as $field) {
+        foreach ($fields as $fieldName => $field) {
             $property = [
-                'type' => $field->getOption('type') ?? $this->config()->get('default_field_type'),
+                'type' => $field['type'] ?? $this->config()->get('default_field_type'),
             ];
 
             foreach ($validProperties as $propertyName) {
-                if ($field->getOption($propertyName) === null) {
+                if (!isset($field[$propertyName])) {
                     continue;
                 }
 
-                $property[$propertyName] = $field->getOption($propertyName);
+                $property[$propertyName] = $field[$propertyName];
             }
 
-            $properties[$field->getSearchFieldName()] = $property;
+            $properties[$fieldName] = $property;
         }
 
         return $properties;
@@ -576,17 +572,21 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
     private function validateIndex(string $index): void
     {
         $validTypes = $this->config()->get('valid_field_types') ?? [];
-
         $map = [];
 
-        // Loop through each Class that has a definition for this index
-        foreach ($this->getConfiguration()->getClassesForIndex($index) as $class) {
-            // Loop through each field that has been defined for that Class
-            foreach ($this->getConfiguration()->getFieldsForClass($class) as $field) {
-                // Check to see if a Type has been defined, or just default to what we have defined
-                $type = $field->getOption('type') ?? $this->config()->get('default_field_type');
+        $classes = $this->getConfiguration()
+            ->getIndexDataForSuffix($index)
+            ->getClasses();
 
-                // We can't progress if a type that we don't support has been defined
+        foreach ($classes as $class) {
+            $classConfig = $this->getConfiguration()
+                ->getIndexConfigurationsForClassName($class);
+
+            $fields = $classConfig[$index]['includeClasses'][$class]['fields'];
+
+            foreach ($fields as $fieldName => $field) {
+                $type = $field['type'] ?? $this->config()->get('default_field_type');
+
                 if (!in_array($type, $validTypes, true)) {
                     throw new IndexConfigurationException(sprintf(
                         'Invalid field type: %s',
@@ -594,26 +594,20 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
                     ));
                 }
 
-                // Check to see if this field name has been defined by any other
-                // Class, and if it has, let's grab what "type" it was described as
-                $alreadyDefined = $map[$field->getSearchFieldName()] ?? null;
+                $alreadyDefined = $map[$fieldName] ?? null;
 
-                // This field name has been defined by another Class, and it was
-                // described as a different type. We don't support multiple types
-                // for a field, so we need to throw an Exception
                 if ($alreadyDefined && $alreadyDefined !== $type) {
                     throw new IndexConfigurationException(sprintf(
                         'Field "%s" is defined twice in the same index with differing types.
                         (%s and %s). Consider changing the field name or explicitly defining
                         the type on each usage',
-                        $field->getSearchFieldName(),
+                        $fieldName,
                         $alreadyDefined,
                         $type
                     ));
                 }
 
-                // Store this field and its type for later comparison
-                $map[$field->getSearchFieldName()] = $type;
+                $map[$fieldName] = $type;
             }
         }
     }
@@ -672,63 +666,4 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
 
         return $documentMap;
     }
-
-    // private function mappingsRequiresUpdate(array $definedMappings, array $elasticMappings): bool
-    // {
-    //     // First we'll loop through the Elastic mappings to see if any
-    //     // current fields have changed in type. If one or more has, then we
-    //     // know we need to update the mappings, and we can break; early
-    //     foreach ($elasticMappings as $fieldName => $field) {
-    //         $type = $field['type'] ?? null;
-    //         $definedType = $definedMappings[$fieldName]['type'] ?? null;
-
-    //         // This field (potentially) no longer exists in our configured mappings
-    //         if (!$definedType) {
-    //             continue;
-    //         }
-
-    //         // The type has changed. We know we need to update, so we can return now
-    //         if ($definedType !== $type && $definedType !== 'object') {
-    //             return true;
-    //         }
-    //     }
-
-    //     // Next we'll loop through our configuration mappings and see if any
-    //     // new fields exists that we haven't yet defined in the Elastic mappings
-    //     foreach (array_keys($definedMappings) as $fieldName) {
-    //         // Check to see if this field exists in the Elastic mappings
-    //         $existingType = $elasticMappings[$fieldName] ?? null;
-
-    //         // If it doesn't, then we know we need to update, and we can return now
-    //         if (!$existingType) {
-    //             return true;
-    //         }
-    //     }
-
-    //     // We got all the way to the end, and didn't find anything that needed to be updated
-    //     return false;
-    // }
-
-    // private function settingsRequiresUpdate(array $definedSettings, array $elasticSettings): bool
-    // {
-    //     // We'll loop through our configuration settings and see if any new
-    //     // settings exists that we haven't yet defined in the Elastic settings
-    //     foreach (array_keys($definedSettings) as $setting) {
-    //         // Check to see if this field exists in the Elastic settings
-    //         $existingSetting = $elasticSettings[$setting] ?? null;
-
-    //         // If it doesn't, then we know we need to update, and we can return now
-    //         if (!$existingSetting) {
-    //             return true;
-    //         }
-
-    //         // Check to see if the setting value has changed
-    //         if ($existingSetting !== $setting) {
-    //             return true;
-    //         }
-    //     }
-
-    //     // We got all the way to the end, and didn't find anything that needed to be updated
-    //     return false;
-    // }
 }

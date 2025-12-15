@@ -20,7 +20,7 @@ variant.
 ```
 ELASTIC_SEARCH_ENDPOINT="https://abc123.ap-southeast-2.aws.found.io"
 ELASTIC_SEARCH_CLOUD_ID="xxx:abc123==" # Alternative to endpoint
-ELASTIC_SEARCH_INDEX_VARIANT="dev"
+ELASTIC_SEARCH_INDEX_PREFIX="dev"
 ELASTIC_SEARCH_API_KEY="abc123"
 ELASTIC_SEARCH_API_ID="xxx" # Only required if Api Key does not contain Api ID in base64 encodeed string
 ELASTIC_SEARCH_DASHBOARD="https://abc123.ap-southeast-2.aws.found.io:9243"
