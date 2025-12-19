@@ -162,7 +162,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
                 ));
             }
 
-            $indexes = $this->getConfiguration()->getIndexesForDocument($document);
+            $indexes = $this->getConfiguration()->getIndexConfigurationsForDocument($document);
 
             foreach (array_keys($indexes) as $indexName) {
                 if (!isset($documentMap[$indexName])) {
@@ -585,7 +585,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
             $fields = $classConfig[$index]['includeClasses'][$class]['fields'];
 
             foreach ($fields as $fieldName => $field) {
-                $type = $field['type'] ?? $this->config()->get('default_field_type');
+                $type = $field['options']['type'] ?? $this->config()->get('default_field_type');
 
                 if (!in_array($type, $validTypes, true)) {
                     throw new IndexConfigurationException(sprintf(
@@ -642,7 +642,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
                 continue;
             }
 
-            $indexes = $this->getConfiguration()->getIndexesForDocument($document);
+            $indexes = $this->getConfiguration()->getIndexConfigurationsForDocument($document);
 
             if (!$indexes) {
                 Injector::inst()->get(LoggerInterface::class)->warn(
