@@ -1,35 +1,70 @@
-# 🧺 Silverstripe Forager > <img src="https://www.elastic.co/android-chrome-192x192.png" style="height:40px; vertical-align:middle"/> Elasticsearch Search provider
+# Silverstripe Forager — OpenSearch provider
 
-This module provides the ability to index content for an Elasticsearch engine using Elastic's
-[Elasticsearch PHP library](https://github.com/elastic/elasticsearch-php).
+OpenSearch search provider for [Silverstripe Forager](https://github.com/silverstripeltd/silverstripe-forager).
 
-Elasticsearch provider for [Silverstripe Forager](https://github.com/silverstripeltd/silverstripe-forager).
+This module provides the ability to index content into an [OpenSearch](https://opensearch.org) cluster using the
+[opensearch-project/opensearch-php](https://github.com/opensearch-project/opensearch-php) client.
 
-This module **does not** provide any method for performing searches on your engines - we've added some
-[suggestions](#searching) though.
+This module **does not** provide any method for performing searches — it handles indexing only.
 
 ## Installation
 
-`composer require somardigital/silverstripe-forager-elasticsearch`
+`composer require somardigital/silverstripe-forager-opensearch`
 
-## Activating Elasticsearch
+## Activating OpenSearch
 
-To start using Elasticsearch, define environment variables containing your API key, endpoint, and
-variant.
+Authentication mode is selected automatically:
+
+- In `SS_ENVIRONMENT_TYPE=dev`, the client uses basic authentication
+- In non-dev environments, the client uses AWS IAM SigV4 authentication
+
+If you want to support overriding this explicitly, pass `auth_type` through Injector config.
+
+General parameters:
 
 ```
-ELASTIC_SEARCH_ENDPOINT="https://abc123.ap-southeast-2.aws.found.io"
-ELASTIC_SEARCH_CLOUD_ID="xxx:abc123==" # Alternative to endpoint
-ELASTIC_SEARCH_INDEX_VARIANT"dev"
-ELASTIC_SEARCH_API_KEY="abc123"
-ELASTIC_SEARCH_API_ID="xxx" # Only required if Api Key does not contain Api ID in base64 encodeed string
-ELASTIC_SEARCH_DASHBOARD="https://abc123.ap-southeast-2.aws.found.io:9243"
+OPENSEARCH_ENDPOINT="https://my-opensearch-host:9200"   # Required
+OPENSEARCH_SSL_VERIFICATION="true"                      # Optional
+OPENSEARCH_INDEX_VARIANT="dev"                         # Optional
+OPENSEARCH_DASHBOARD="https://my-opensearch-host:5601" # Optional, not used by this module directly
 ```
 
-## Configuring Elasticsearch
+### Local (basic auth)
 
-The most notable configuration surface for Elasticsearch is the schema, which determines how data is stored in your
-Elasticsearch index (engine). There are the following types of data currently configured in this module:
+Define these environment variables for basic auth:
+
+```
+SS_ENVIRONMENT_TYPE="dev"
+OPENSEARCH_ENDPOINT="https://localhost:9200"
+OPENSEARCH_USERNAME="admin"
+OPENSEARCH_PASSWORD="secret"
+OPENSEARCH_SSL_VERIFICATION="false" # optional if using a self-signed local cert
+```
+
+### Non-local (AWS IAM SigV4)
+
+Define these environment variables for SigV4 auth:
+
+```
+SS_ENVIRONMENT_TYPE="live"
+OPENSEARCH_ENDPOINT="https://search-domain.region.es.amazonaws.com"
+OPENSEARCH_AWS_REGION="ap-southeast-2"
+OPENSEARCH_AWS_SERVICE="es" # optional, defaults to es
+OPENSEARCH_AWS_ACCESS_KEY_ID="AKIA..."       # Optional
+OPENSEARCH_AWS_SECRET_ACCESS_KEY="..."       # Optional
+OPENSEARCH_AWS_SESSION_TOKEN="..."           # Optional
+```
+
+`OPENSEARCH_AWS_SERVICE` defaults to `es` when omitted.
+
+For SigV4 authentication, the AWS SDK for PHP must be available. If explicit credentials are not provided, the client falls back to the default AWS credential provider chain.
+
+> **Security note:** Ensure your OpenSearch endpoint is served over HTTPS so that credentials are encrypted in transit.
+
+## Configuring OpenSearch
+
+The most notable configuration surface is the schema, which determines how data is stored in your
+OpenSearch index. There are the following field types currently supported:
 
 - `text` (default)
 - `alias`
@@ -75,13 +110,12 @@ SilverStripe\Forager\Service\IndexConfiguration:
 
 ```
 
-**Note**: Be careful about whimsically changing your schema. ElasticSearch may need to be fully reindexed if you
-change the name of a field. Fields cannot be deleted so re-naming one will leave any previously created fields around.
+**Note**: Be careful about changing your schema. OpenSearch may need to be fully reindexed if you
+change the name of a field. Fields cannot be deleted, so renaming one will leave any previously created fields around.
 
 ## Indexing File Content
 
-The [silverstripe-text-extraction](https://github.com/silverstripe/silverstripe-textextraction) module is the recommended approach for
-fetching the content of files to index. Once configured, you can use the getFileContent method on a file to get the content.
+The [silverstripe/textextraction](https://docs.silverstripe.org/en/6/optional_features/textextraction/) module is the recommended approach for extracting file content for indexing.
 
 ```yaml
 SilverStripe\Forager\Service\IndexConfiguration:
@@ -103,8 +137,3 @@ to you are:
 
 - [Configuration](https://github.com/silverstripeltd/silverstripe-forager/blob/1/docs/en/configuration.md)
 - [Customisation](https://github.com/silverstripeltd/silverstripe-forager/blob/1/docs/en/customising.md)
-
-## Credits
-
-This module is based on the
-[silverstripe-forager-elastic-enterprise](https://github.com/silverstripeltd/silverstripe-forager-elastic-enterprise) module

@@ -2,51 +2,88 @@
 
 namespace Somar\ForagerElasticsearch\Service;
 
-use Elastic\Elasticsearch\Client;
-use Elastic\Elasticsearch\ClientBuilder;
-use Exception;
+use InvalidArgumentException;
+use OpenSearch\Client;
+use OpenSearch\ClientBuilder;
+use SilverStripe\Core\Environment;
 use SilverStripe\Core\Injector\Factory;
 
 class ClientFactory implements Factory
 {
-    /**
-     * @throws Exception
-     */
     public function create($service, array $params = []): Client // phpcs:ignore SlevomatCodingStandard.TypeHints
     {
-        $host = $params['endpoint'] ?? null;
-        $cloudId = $params['cloud_id'] ?? null;
-        $apiId = $params['api_id'] ?? null;
-        $apiKey = $params['api_key'] ?? null;
-        $httpClient = $params['http_client'] ?? null;
+        $endpoint = $params['endpoint'] ?? Environment::getEnv('OPENSEARCH_ENDPOINT') ?: null;
+        $username = $params['username'] ?? Environment::getEnv('OPENSEARCH_USERNAME') ?: null;
+        $password = $params['password'] ?? Environment::getEnv('OPENSEARCH_PASSWORD') ?: null;
 
-        $builder = ClientBuilder::create();
+        $awsRegion = $params['aws_region'] ?? Environment::getEnv('OPENSEARCH_AWS_REGION') ?: null;
+        $awsService = $params['aws_service'] ?? Environment::getEnv('OPENSEARCH_AWS_SERVICE') ?: 'es';
+        $awsAccessKeyId = $params['aws_access_key_id'] ?? Environment::getEnv('OPENSEARCH_AWS_ACCESS_KEY_ID') ?: null;
+        $awsSecretAccessKey = $params['aws_secret_access_key'] ?? Environment::getEnv('OPENSEARCH_AWS_SECRET_ACCESS_KEY') ?: null;
+        $awsSessionToken = $params['aws_session_token'] ?? Environment::getEnv('OPENSEARCH_AWS_SESSION_TOKEN') ?: null;
 
-        if ($host) {
-            $builder->setHosts([$host]);
-        } elseif ($cloudId) {
-            $builder->setElasticCloudId($cloudId);
+        $sslVerification = $params['ssl_verification']
+            ?? (strtolower((string) (Environment::getEnv('SS_ENVIRONMENT_TYPE') ?: 'live')) === 'dev' ? false : true);
+
+        $environmentType = strtolower((string) (Environment::getEnv('SS_ENVIRONMENT_TYPE') ?: 'live'));
+        $authType = $params['auth_type'] ?? ($environmentType === 'dev' ? 'basic' : 'sigv4');
+
+        if (!$endpoint) {
+            throw new InvalidArgumentException('Missing OpenSearch endpoint.');
+        }
+
+        $parsed = parse_url($endpoint);
+
+        if (!$parsed || empty($parsed['host'])) {
+            throw new InvalidArgumentException(sprintf(
+                'Invalid OpenSearch endpoint "%s". Expected something like http://localhost:9200 or https://localhost:9200',
+                $endpoint
+            ));
+        }
+
+        $scheme = $parsed['scheme'] ?? 'http';
+        $host = $parsed['host'];
+        $port = $parsed['port'] ?? ($scheme === 'https' ? 443 : 9200);
+
+        $builder = ClientBuilder::create()
+            ->setHosts([[
+                'host' => $host,
+                'port' => $port,
+                'scheme' => $scheme,
+            ]])
+            ->setSSLVerification($sslVerification);
+
+        if ($authType === 'basic') {
+            if (!$username || !$password) {
+                throw new InvalidArgumentException('Basic auth requires username and password.');
+            }
+
+            $builder->setBasicAuthentication($username, $password);
+        } elseif ($authType === 'sigv4') {
+            if (!$awsRegion) {
+                throw new InvalidArgumentException('SigV4 auth requires aws_region.');
+            }
+
+            $builder
+                ->setSigV4Region($awsRegion)
+                ->setSigV4Service($awsService);
+
+            if ($awsAccessKeyId && $awsSecretAccessKey) {
+                $credentials = [
+                    'key' => $awsAccessKeyId,
+                    'secret' => $awsSecretAccessKey,
+                ];
+
+                if ($awsSessionToken) {
+                    $credentials['token'] = $awsSessionToken;
+                }
+
+                $builder->setSigV4CredentialProvider($credentials);
+            } else {
+                $builder->setSigV4CredentialProvider(true);
+            }
         } else {
-            throw new Exception(sprintf(
-                'The %s implementation requires environment variables: ' .
-                'ELASTIC_SEARCH_ENDPOINT or ELASTIC_SEARCH_CLOUD_ID',
-                Client::class
-            ));
-        }
-
-        if (!$apiKey) {
-            throw new Exception(sprintf(
-                'The %s implementation requires environment variables: ' .
-                'ELASTIC_SEARCH_API_KEY ',
-                Client::class
-            ));
-        }
-
-        // If only the API key is provided, Elastic assumes its already base64 encoded
-        $builder->setApiKey($apiKey, $apiId);
-
-        if ($httpClient) {
-            $builder->setHttpClient($httpClient);
+            throw new InvalidArgumentException(sprintf('Unsupported auth_type "%s".', $authType));
         }
 
         return $builder->build();
