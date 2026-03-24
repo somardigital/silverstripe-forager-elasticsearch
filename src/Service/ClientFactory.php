@@ -13,7 +13,7 @@ class ClientFactory implements Factory
     {
         $endpoint = $params['endpoint'] ?? throw new InvalidArgumentException('Missing OpenSearch endpoint.');
 
-        $sslVerification = $params['ssl_verification'] ?? true;
+        $sslVerification = filter_var($params['ssl_verification'] ?? true, FILTER_VALIDATE_BOOLEAN);
 
         $builder = ClientBuilder::create()
             ->setHosts([$endpoint])
