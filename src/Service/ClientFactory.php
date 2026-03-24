@@ -13,9 +13,11 @@ class ClientFactory implements Factory
     {
         $endpoint = $params['endpoint'] ?? throw new InvalidArgumentException('Missing OpenSearch endpoint.');
 
+        $sslVerification = $params['ssl_verification'] ?? true;
+
         $builder = ClientBuilder::create()
             ->setHosts([$endpoint])
-            ->setSSLVerification(true);
+            ->setSSLVerification($sslVerification);
 
         // 1. LOCAL DEV: Use Basic Auth if username & password are provided
         if (!empty($params['username']) && !empty($params['password'])) {
