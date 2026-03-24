@@ -22,9 +22,20 @@ class ClientFactory implements Factory
         $awsSecretAccessKey = $params['aws_secret_access_key'] ?? Environment::getEnv('OPENSEARCH_AWS_SECRET_ACCESS_KEY') ?: null;
         $awsSessionToken = $params['aws_session_token'] ?? Environment::getEnv('OPENSEARCH_AWS_SESSION_TOKEN') ?: null;
 
-        $sslVerification = $params['ssl_verification']
-            ?? (strtolower((string) (Environment::getEnv('SS_ENVIRONMENT_TYPE') ?: 'live')) === 'dev' ? false : true);
+        $sslVerification = $params['ssl_verification'] ?? Environment::getEnv('OPENSEARCH_SSL_VERIFICATION');
 
+        if ($sslVerification !== null && is_string($sslVerification)) {
+            $normalized = filter_var($sslVerification, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($normalized !== null) {
+                $sslVerification = $normalized;
+            }
+        }
+
+        if ($sslVerification === null) {
+            $sslVerification = strtolower((string) (Environment::getEnv('SS_ENVIRONMENT_TYPE') ?: 'live')) === 'dev'
+                ? false
+                : true;
+        }
         $environmentType = strtolower((string) (Environment::getEnv('SS_ENVIRONMENT_TYPE') ?: 'live'));
         $authType = $params['auth_type'] ?? ($environmentType === 'dev' ? 'basic' : 'sigv4');
 
