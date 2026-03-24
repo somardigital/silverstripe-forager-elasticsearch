@@ -1,15 +1,16 @@
 # Silverstripe Forager — OpenSearch provider
 
-OpenSearch search provider for [Silverstripe Forager](https://github.com/silverstripeltd/silverstripe-forager).
+OpenSearch indexing provider for [Silverstripe Forager](https://github.com/silverstripeltd/silverstripe-forager).
 
 This module provides the ability to index content into an [OpenSearch](https://opensearch.org) cluster using the
 [opensearch-project/opensearch-php](https://github.com/opensearch-project/opensearch-php) client.
 
-This module **does not** provide any method for performing searches — it handles indexing only.
+This module **does not** provide any method for performing searches. It is responsible for indexing only.
 
 ## Installation
 
-`composer require somardigital/silverstripe-forager-opensearch`
+```bash
+composer require somardigital/silverstripe-forager-opensearch
 
 ## Activating OpenSearch
 
@@ -23,10 +24,9 @@ If you want to support overriding this explicitly, pass `auth_type` through Inje
 General parameters:
 
 ```
-OPENSEARCH_ENDPOINT="https://my-opensearch-host:9200"   # Required
-OPENSEARCH_SSL_VERIFICATION="true"                      # Optional
-OPENSEARCH_INDEX_VARIANT="dev"                         # Optional
-OPENSEARCH_DASHBOARD="https://my-opensearch-host:5601" # Optional, not used by this module directly
+OPENSEARCH_ENDPOINT="https://localhost:9200"   # Required
+OPENSEARCH_SSL_VERIFICATION="true"             # Optional, defaults to true
+OPENSEARCH_INDEX_VARIANT="dev"                 # Optional
 ```
 
 ### Local (basic auth)
@@ -34,11 +34,10 @@ OPENSEARCH_DASHBOARD="https://my-opensearch-host:5601" # Optional, not used by t
 Define these environment variables for basic auth:
 
 ```
-SS_ENVIRONMENT_TYPE="dev"
 OPENSEARCH_ENDPOINT="https://localhost:9200"
 OPENSEARCH_USERNAME="admin"
 OPENSEARCH_PASSWORD="secret"
-OPENSEARCH_SSL_VERIFICATION="false" # optional if using a self-signed local cert
+OPENSEARCH_SSL_VERIFICATION="false" # Optional if using a self-signed local certificate
 ```
 
 ### Non-local (AWS IAM SigV4)
@@ -46,13 +45,9 @@ OPENSEARCH_SSL_VERIFICATION="false" # optional if using a self-signed local cert
 Define these environment variables for SigV4 auth:
 
 ```
-SS_ENVIRONMENT_TYPE="live"
 OPENSEARCH_ENDPOINT="https://search-domain.region.es.amazonaws.com"
 OPENSEARCH_AWS_REGION="ap-southeast-2"
-OPENSEARCH_AWS_SERVICE="es" # optional, defaults to es
-OPENSEARCH_AWS_ACCESS_KEY_ID="AKIA..."       # Optional
-OPENSEARCH_AWS_SECRET_ACCESS_KEY="..."       # Optional
-OPENSEARCH_AWS_SESSION_TOKEN="..."           # Optional
+OPENSEARCH_AWS_SERVICE="es" # Optional, defaults to "es". Use "aoss" for OpenSearch Serverless.
 ```
 
 `OPENSEARCH_AWS_SERVICE` defaults to `es` when omitted.

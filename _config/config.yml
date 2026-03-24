@@ -23,14 +23,10 @@ SilverStripe\Core\Injector\Injector:
     factory: Somar\ForagerElasticsearch\Service\ClientFactory
     constructor:
       endpoint: '`OPENSEARCH_ENDPOINT`'
-      ssl_verification: '`OPENSEARCH_SSL_VERIFICATION`'
       username: '`OPENSEARCH_USERNAME`'
       password: '`OPENSEARCH_PASSWORD`'
-      aws_region: '`OPENSEARCH_AWS_REGION`'
       aws_service: '`OPENSEARCH_AWS_SERVICE`'
-      aws_access_key_id: '`OPENSEARCH_AWS_ACCESS_KEY_ID`'
-      aws_secret_access_key: '`OPENSEARCH_AWS_SECRET_ACCESS_KEY`'
-      aws_session_token: '`OPENSEARCH_AWS_SESSION_TOKEN`'
+      aws_region: '`OPENSEARCH_AWS_REGION`'
 
 # // analysis is the top-level OpenSearch settings key where analyzers, tokenizers, char filters, and token filters are configured
 Somar\ForagerElasticsearch\Service\OpensearchService:

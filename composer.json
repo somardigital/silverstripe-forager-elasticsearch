@@ -20,6 +20,7 @@
         "silverstripe/framework": "^5.1",
         "silverstripe/silverstripe-forager": "^1",
         "opensearch-project/opensearch-php": "^2",
+        "aws/aws-sdk-php": "^3",
         "guzzlehttp/guzzle": "^7"
     },
     "require-dev": {

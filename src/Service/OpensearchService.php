@@ -98,7 +98,7 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
 
     public function getMaxDocumentSize(): int
     {
-        return $this->config()->get('max_document_size') ?? 102400;
+        return $this->config()->get('max_document_size');
     }
 
     public function addDocument(DocumentInterface $document): ?string
