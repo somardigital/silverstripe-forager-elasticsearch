@@ -1,31 +1,39 @@
 ---
-Name: silverstripe-forager-elasticsearch
+Name: silverstripe-forager-opensearch
 Only:
-  envvarset: 'ELASTIC_SEARCH_API_KEY'
+  envvarset: 'OPENSEARCH_ENDPOINT'
 After:
   - 'silverstripe-forager'
   - 'search-forager-default'
 ---
+
 SilverStripe\Core\Injector\Injector:
   SilverStripe\Forager\Service\IndexConfiguration:
     constructor:
-      index_variant: '`ELASTIC_SEARCH_INDEX_VARIANT`'
+      index_variant: '`OPENSEARCH_INDEX_VARIANT`'
+
   SilverStripe\Forager\Interfaces\IndexingInterface:
-    class: Somar\ForagerElasticsearch\Service\ElasticsearchService
+    class: Somar\ForagerElasticsearch\Service\OpensearchService
     constructor:
-      client: '%$Elastic\Elasticsearch\Client.managementClient'
+      client: '%$OpenSearch\Client.managementClient'
       configuration: '%$SilverStripe\Forager\Service\IndexConfiguration'
       builder: '%$SilverStripe\Forager\Service\DocumentBuilder'
-  Elastic\Elasticsearch\Client.managementClient:
+
+  OpenSearch\Client.managementClient:
     factory: Somar\ForagerElasticsearch\Service\ClientFactory
     constructor:
-      endpoint: '`ELASTIC_SEARCH_ENDPOINT`'
-      cloud_id: '`ELASTIC_SEARCH_CLOUD_ID`'
-      api_id: '`ELASTIC_SEARCH_API_ID`'
-      api_key: '`ELASTIC_SEARCH_API_KEY`'
-      http_client: '%$GuzzleHttp\Client'
+      endpoint: '`OPENSEARCH_ENDPOINT`'
+      username: '`OPENSEARCH_USERNAME`'
+      password: '`OPENSEARCH_PASSWORD`'
+      aws_service: '`OPENSEARCH_AWS_SERVICE`'
+      aws_region: '`OPENSEARCH_AWS_REGION`'
+      ssl_verification: '`OPENSEARCH_SSL_VERIFICATION`'
 
-## customise the dataobject fields for ElasticSearch compatability
+# // analysis is the top-level OpenSearch settings key where analyzers, tokenizers, char filters, and token filters are configured
+Somar\ForagerElasticsearch\Service\OpensearchService:
+  settings_requiring_closed_index:
+    - analysis
+
 SilverStripe\Forager\DataObject\DataObjectDocument:
   id_field: record_id
   base_class_field: record_base_class

@@ -2,51 +2,42 @@
 
 namespace Somar\ForagerElasticsearch\Service;
 
-use Elastic\Elasticsearch\Client;
-use Elastic\Elasticsearch\ClientBuilder;
-use Exception;
+use InvalidArgumentException;
+use OpenSearch\Client;
+use OpenSearch\ClientBuilder;
 use SilverStripe\Core\Injector\Factory;
 
 class ClientFactory implements Factory
 {
-    /**
-     * @throws Exception
-     */
-    public function create($service, array $params = []): Client // phpcs:ignore SlevomatCodingStandard.TypeHints
+    public function create($service, array $params = []): Client
     {
-        $host = $params['endpoint'] ?? null;
-        $cloudId = $params['cloud_id'] ?? null;
-        $apiId = $params['api_id'] ?? null;
-        $apiKey = $params['api_key'] ?? null;
-        $httpClient = $params['http_client'] ?? null;
+        $endpoint = $params['endpoint'] ?? throw new InvalidArgumentException('Missing OpenSearch endpoint.');
 
-        $builder = ClientBuilder::create();
+        $sslVerification = filter_var($params['ssl_verification'] ?? true, FILTER_VALIDATE_BOOLEAN);
 
-        if ($host) {
-            $builder->setHosts([$host]);
-        } elseif ($cloudId) {
-            $builder->setElasticCloudId($cloudId);
-        } else {
-            throw new Exception(sprintf(
-                'The %s implementation requires environment variables: ' .
-                'ELASTIC_SEARCH_ENDPOINT or ELASTIC_SEARCH_CLOUD_ID',
-                Client::class
-            ));
+        $builder = ClientBuilder::create()
+            ->setHosts([$endpoint])
+            ->setSSLVerification($sslVerification);
+
+        // 1. LOCAL DEV: Use Basic Auth if username & password are provided
+        if (!empty($params['username']) && !empty($params['password'])) {
+            $builder->setBasicAuthentication($params['username'], $params['password']);
         }
 
-        if (!$apiKey) {
-            throw new Exception(sprintf(
-                'The %s implementation requires environment variables: ' .
-                'ELASTIC_SEARCH_API_KEY ',
-                Client::class
-            ));
+        // 2. AWS: Use SigV4 if an AWS Region and Service are provided
+        elseif (!empty($params['aws_region']) && !empty($params['aws_service'])) {
+            $builder->setSigV4Region($params['aws_region']);
+            $builder->setSigV4Service($params['aws_service']);
+
+            // Use the default AWS credential provider chain for SigV4 authentication.
+            // Credentials are resolved from environment variables, local AWS profile files,
+            // or IAM roles attached to the running environment. In our case, we expect IAM roles.
+            // https://opensearch.org/blog/aws-sigv4-support-for-clients/
+            $builder->setSigV4CredentialProvider(true);
         }
 
-        // If only the API key is provided, Elastic assumes its already base64 encoded
-        $builder->setApiKey($apiKey, $apiId);
-
-        if ($httpClient) {
-            $builder->setHttpClient($httpClient);
+        else {
+            throw new InvalidArgumentException('Provide either Basic Auth (local) or AWS Region (test/uat/production).');
         }
 
         return $builder->build();

@@ -1,0 +1,11 @@
+---
+Name: silverstripe-forager-opensearch-elemental
+Only:
+  moduleexists: 'dnadesign/silverstripe-elemental'
+After:
+  - 'silverstripe-forager-opensearch'
+---
+
+DNADesign\Elemental\Models\BaseElement:
+  extensions:
+    - Somar\ForagerElasticsearch\Extensions\ElementalReindexExtension
