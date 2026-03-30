@@ -2,8 +2,8 @@
 
 namespace Somar\ForagerElasticsearch\Service;
 
+use Elastic\Elasticsearch\Client;
 use InvalidArgumentException;
-use OpenSearch\Client;
 use Psr\Log\LoggerInterface;
 use SilverStripe\Core\Config\Configurable;
 use SilverStripe\Core\Environment;
@@ -19,8 +19,9 @@ use SilverStripe\Forager\Service\DocumentBuilder;
 use SilverStripe\Forager\Service\IndexConfiguration;
 use SilverStripe\Forager\Service\Traits\ConfigurationAware;
 
-class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterface
+class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInterface
 {
+
     use Configurable;
     use ConfigurationAware;
     use Injectable;
@@ -66,14 +67,6 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
         'term_vector',
     ];
 
-    /**
-     * Settings keys that require the index to be closed before updating.
-     * This supports future analysis updates such as synonyms and stop words.
-     */
-    private static array $settings_requiring_closed_index = [
-        'analysis',
-    ];
-
     public function __construct(Client $client, IndexConfiguration $configuration, DocumentBuilder $builder)
     {
         $this->setClient($client);
@@ -83,17 +76,17 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
 
     public function getExternalURL(): ?string
     {
-        return Environment::getEnv('OPENSEARCH_DASHBOARD') ?: null;
+        return Environment::getEnv('ELASTIC_SEARCH_DASHBOARD') ?: null;
     }
 
     public function getExternalURLDescription(): ?string
     {
-        return 'OpenSearch Dashboard';
+        return 'Elastic Search Dashboard';
     }
 
     public function getDocumentationURL(): ?string
     {
-        return 'https://opensearch.org/docs/latest/';
+        return 'https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html';
     }
 
     public function getMaxDocumentSize(): int
@@ -131,6 +124,7 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
                 'body' => $body,
             ]);
 
+            // Grab all the ID values, and also cast them to string
             foreach ($response['items'] as $item) {
                 if (isset($item['index']['error'])) {
                     throw new IndexingServiceException(
@@ -192,6 +186,7 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
                 'body' => $body,
             ]);
 
+            // Grab all the ID values, and also cast them to string
             foreach ($response['items'] as $item) {
                 if (isset($item['delete']['error'])) {
                     throw new IndexingServiceException(
@@ -203,11 +198,13 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
             }
         }
 
+        // One document could have existed in multiple indexes, we only care to track it once
         return array_unique($processedIds);
     }
 
-    /**
-     * Remove all documents from the provided index using delete-by-query.
+     /**
+     * Forcefully remove all documents from the provided index name. Batches the requests to Elastic based upon the
+     * configured batch size, beginning at page 1 and continuing until the index is empty.
      *
      * @param string $indexName The index name to remove all documents from
      * @return int The total number of documents removed
@@ -248,13 +245,13 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
                 ],
             ]);
 
-            $results = $response['docs'] ?? [];
+            $results = $response['hits']['hits'] ?? null;
+
+            if (!$results) {
+                continue;
+            }
 
             foreach ($results as $data) {
-                if (!($data['found'] ?? false)) {
-                    continue;
-                }
-
                 $document = $this->getBuilder()->fromArray($data);
 
                 if (!$document) {
@@ -271,23 +268,21 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
     public function listDocuments(string $indexName, ?int $pageSize = null, int $currentPage = 0): array
     {
         $docs = [];
-
         $params = [
             'index' => $this->environmentizeIndex($indexName),
-            'body' => [
-                'query' => [
-                    'match_all' => new \stdClass(),
-                ],
-            ],
+            'from' => $currentPage,
         ];
 
-        if ($pageSize !== null) {
+        if ($pageSize) {
             $params['size'] = $pageSize;
-            $params['from'] = $currentPage * $pageSize;
         }
 
         $response = $this->getClient()->search($params);
-        $results = $response['hits']['hits'] ?? [];
+        $results = $response['results'] ?? null;
+
+        if (!$results) {
+            return [];
+        }
 
         foreach ($results as $data) {
             $document = $this->getBuilder()->fromArray($data);
@@ -308,7 +303,7 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
             'index' => $this->environmentizeIndex($indexName),
         ]);
 
-        return (int) ($response['count'] ?? 0);
+        return $response['count'] ?? null;
     }
 
     public function getIndexSettings(string $indexName): array
@@ -320,7 +315,7 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
 
     public function configure(): array
     {
-        $indices = $this->getClient()->indices();
+        $indicies = $this->getClient()->indices();
         $schemas = [];
 
         foreach (array_keys($this->getConfiguration()->getIndexes()) as $indexName) {
@@ -329,15 +324,38 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
             $envIndex = $this->environmentizeIndex($indexName);
             $this->findOrMakeIndex($envIndex);
 
+            // Fetch the mappings, as it currently exists in Elastic
+            // $elasticMappings = $indicies
+            //     ->getMapping(['index' => $envIndex])[$envIndex]['mappings']['properties'] ?? [];
+
+            // Fetch the mappings, as it is currently configured in our application
             $definedMappings = $this->getMappingsForFields(
                 $this->getConfiguration()->getFieldsForIndex($indexName)
             );
 
+            // Fetch the settings, as it currently exists in Elastic
+            // $elasticSettings = $indicies
+            //     ->getSettings(['index' => $envIndex])[$envIndex]['settings'] ?? [];
+
+            // Fetch the settings, as it is currently configured in our application
             $definedSettings = $this->getIndexSettings($indexName);
 
+            // Check to see if there are any important differences between our mappings and settings.
+            // If there are, we'll want to update
+            // if (!$this->mappingsRequiresUpdate($definedMappings, $elasticMappings) &&
+            //     !$this->settingsRequiresUpdate($definedSettings, $elasticSettings)) {
+            //     // No updates found, add this to our tracked schemas
+            //     $schemas[$indexName] = true;
+
+            //     continue;
+            // }
+
+            // Trigger an update to Elastic with our current configured mappings and settings
             try {
+                $indicies->close(['index' => $envIndex]);
+
                 if (count($definedMappings) > 0) {
-                    $indices->putMapping([
+                    $indicies->putMapping([
                         'index' => $envIndex,
                         'body' => [
                             'properties' => $definedMappings,
@@ -346,15 +364,24 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
                 }
 
                 if (count($definedSettings) > 0) {
-                    $this->applyIndexSettings($envIndex, $definedSettings);
+                    $indicies->putSettings([
+                        'index' => $envIndex,
+                        'body' => [
+                            'settings' => $definedSettings,
+                        ],
+                    ]);
                 }
             } catch (\Throwable $e) {
                 throw new IndexingServiceException(sprintf(
                     'Failed to update index mapping and settings: %s',
                     $e->getMessage(),
                 ));
+            } finally {
+                // Make sure we re-open the index, regardless of the outcome
+                $indicies->open(['index' => $envIndex]);
             }
 
+            // Add this updated schema to our tracked schemas
             $schemas[$indexName] = true;
         }
 
@@ -365,19 +392,20 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
     {
         $this->validateIndex($indexName);
 
-        $indices = $this->getClient()->indices();
+        $indicies = $this->getClient()->indices();
         $envIndex = $this->environmentizeIndex($indexName);
 
-        $definedMappings = $this->getMappingsForFields(
-            $this->getConfiguration()->getFieldsForIndex($indexName)
-        );
+        // Fetch the mappings, as configured in our application
+        $definedMappings = $this->getMappingsForFields($this->getConfiguration()->getFieldsForIndex($indexName));
 
         if (count($definedMappings) === 0) {
             return;
         }
 
+        // Trigger an update to Elastic with mappings
         try {
-            $indices->putMapping([
+            $indicies->close(['index' => $envIndex]);
+            $indicies->putMapping([
                 'index' => $envIndex,
                 'body' => [
                     'properties' => $definedMappings,
@@ -388,6 +416,9 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
                 'Failed to update index mapping: %s',
                 $e->getMessage(),
             ));
+        } finally {
+            // Make sure we re-open the index, regardless of the outcome
+            $indicies->open(['index' => $envIndex]);
         }
     }
 
@@ -395,20 +426,33 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
     {
         $this->validateIndex($indexName);
 
+        $indicies = $this->getClient()->indices();
         $envIndex = $this->environmentizeIndex($indexName);
+
+        // Fetch the settings, as configured in our application
         $definedSettings = $this->getIndexSettings($indexName);
 
         if (count($definedSettings) === 0) {
             return;
         }
 
+        // Trigger an update to Elastic with settings
         try {
-            $this->applyIndexSettings($envIndex, $definedSettings);
+            $indicies->close(['index' => $envIndex]);
+            $indicies->putSettings([
+                'index' => $envIndex,
+                'body' => [
+                    'settings' => $definedSettings,
+                ],
+            ]);
         } catch (\Throwable $e) {
             throw new IndexingServiceException(sprintf(
                 'Failed to update index settings: %s',
                 $e->getMessage(),
             ));
+        } finally {
+            // Make sure we re-open the index, regardless of the outcome
+            $indicies->open(['index' => $envIndex]);
         }
     }
 
@@ -435,10 +479,12 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
         $isSuffix = $this->config()->get('variant_is_suffix');
 
         if ($variant && $isSuffix) {
+            // Add as suffix to index name
             return sprintf('%s_%s', $indexName, $variant);
         }
 
         if ($variant) {
+            // Add as prefix to index name
             return sprintf('%s_%s', $variant, $indexName);
         }
 
@@ -455,14 +501,14 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
         return $this->builder;
     }
 
-    public function setClient(Client $client): OpensearchService
+    public function setClient(Client $client): ElasticsearchService
     {
         $this->client = $client;
 
         return $this;
     }
 
-    public function setBuilder(DocumentBuilder $builder): OpensearchService
+    public function setBuilder(DocumentBuilder $builder): ElasticsearchService
     {
         $this->builder = $builder;
 
@@ -473,7 +519,7 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
     {
         $indices = $this->getClient()->indices();
 
-        if ($indices->exists(['index' => $index])) {
+        if ($indices->exists(['index' => $index])->asBool()) {
             return;
         }
 
@@ -508,66 +554,23 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
         return $properties;
     }
 
-    private function applyIndexSettings(string $indexName, array $settings): void
-    {
-        $indices = $this->getClient()->indices();
-        $shouldClose = $this->settingsRequireClosedIndex($settings);
-
-        try {
-            if ($shouldClose) {
-                $this->closeIndex($indexName);
-            }
-
-            $indices->putSettings([
-                'index' => $indexName,
-                'body' => [
-                    'settings' => $settings,
-                ],
-            ]);
-        } finally {
-            if ($shouldClose) {
-                $this->openIndex($indexName);
-            }
-        }
-    }
-
-    private function settingsRequireClosedIndex(array $settings): bool
-    {
-        $keys = $this->config()->get('settings_requiring_closed_index') ?? [];
-
-        foreach ($keys as $key) {
-            if (array_key_exists($key, $settings)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function closeIndex(string $indexName): void
-    {
-        $this->getClient()->indices()->close(['index' => $indexName]);
-    }
-
-    private function openIndex(string $indexName): void
-    {
-        $this->getClient()->indices()->open(['index' => $indexName]);
-    }
-
     /**
      * @throws IndexConfigurationException
      */
     private function validateIndex(string $index): void
     {
         $validTypes = $this->config()->get('valid_field_types') ?? [];
+
         $map = [];
 
+        // Loop through each Class that has a definition for this index
         foreach ($this->getConfiguration()->getClassesForIndex($index) as $class) {
+            // Loop through each field that has been defined for that Class
             foreach ($this->getConfiguration()->getFieldsForClass($class) as $field) {
-                $this->validateField($field->getSearchFieldName());
-
+                // Check to see if a Type has been defined, or just default to what we have defined
                 $type = $field->getOption('type') ?? $this->config()->get('default_field_type');
 
+                // We can't progress if a type that we don't support has been defined
                 if (!in_array($type, $validTypes, true)) {
                     throw new IndexConfigurationException(sprintf(
                         'Invalid field type: %s',
@@ -575,8 +578,12 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
                     ));
                 }
 
+                // Check to see if this field name has been defined by any other Class, and if it has, let's grab what
+                // "type" it was described as
                 $alreadyDefined = $map[$field->getSearchFieldName()] ?? null;
 
+                // This field name has been defined by another Class, and it was described as a different type. We
+                // don't support multiple types for a field, so we need to throw an Exception
                 if ($alreadyDefined && $alreadyDefined !== $type) {
                     throw new IndexConfigurationException(sprintf(
                         'Field "%s" is defined twice in the same index with differing types.
@@ -588,6 +595,7 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
                     ));
                 }
 
+                // Store this field and its type for later comparison
                 $map[$field->getSearchFieldName()] = $type;
             }
         }
@@ -626,7 +634,7 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
             $indexes = $this->getConfiguration()->getIndexesForDocument($document);
 
             if (!$indexes) {
-                Injector::inst()->get(LoggerInterface::class)->warning(
+                Injector::inst()->get(LoggerInterface::class)->warn(
                     sprintf('No valid indexes found for document %s, skipping...', $document->getIdentifier())
                 );
 
@@ -644,4 +652,62 @@ class OpensearchService implements IndexingInterface, BatchDocumentRemovalInterf
 
         return $documentMap;
     }
+
+    // private function mappingsRequiresUpdate(array $definedMappings, array $elasticMappings): bool
+    // {
+    //     // First we'll loop through the Elastic mappings to see if any current fields have changed in type. If one
+    //     // or more has, then we know we need to update the mappings, and we can break; early
+    //     foreach ($elasticMappings as $fieldName => $field) {
+    //         $type = $field['type'] ?? null;
+    //         $definedType = $definedMappings[$fieldName]['type'] ?? null;
+
+    //         // This field (potentially) no longer exists in our configured mappings
+    //         if (!$definedType) {
+    //             continue;
+    //         }
+
+    //         // The type has changed. We know we need to update, so we can return now
+    //         if ($definedType !== $type && $definedType !== 'object') {
+    //             return true;
+    //         }
+    //     }
+
+    //     // Next we'll loop through our configuration mappings and see if any new fields exists that we haven't yet
+    //     // defined in the Elastic mappings
+    //     foreach (array_keys($definedMappings) as $fieldName) {
+    //         // Check to see if this field exists in the Elastic mappings
+    //         $existingType = $elasticMappings[$fieldName] ?? null;
+
+    //         // If it doesn't, then we know we need to update, and we can return now
+    //         if (!$existingType) {
+    //             return true;
+    //         }
+    //     }
+
+    //     // We got all the way to the end, and didn't find anything that needed to be updated
+    //     return false;
+    // }
+
+    // private function settingsRequiresUpdate(array $definedSettings, array $elasticSettings): bool
+    // {
+    //     // We'll loop through our configuration settings and see if any new settings exists that we haven't yet
+    //     // defined in the Elastic settings
+    //     foreach (array_keys($definedSettings) as $setting) {
+    //         // Check to see if this field exists in the Elastic settings
+    //         $existingSetting = $elasticSettings[$setting] ?? null;
+
+    //         // If it doesn't, then we know we need to update, and we can return now
+    //         if (!$existingSetting) {
+    //             return true;
+    //         }
+
+    //         // Check to see if the setting value has changed
+    //         if ($existingSetting !== $setting) {
+    //             return true;
+    //         }
+    //     }
+
+    //     // We got all the way to the end, and didn't find anything that needed to be updated
+    //     return false;
+    // }
 }
