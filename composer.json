@@ -1,6 +1,6 @@
 {
-    "name": "somardigital/silverstripe-forager-opensearch",
-    "description": "OpenSearch Search Provider for Silverstripe Forager",
+    "name": "somardigital/silverstripe-forager-elasticsearch",
+    "description": "Elasticsearch Search Provider for Silverstripe Forager",
     "type": "silverstripe-vendormodule",
     "license": "BSD-3-Clause",
     "authors": [
@@ -10,8 +10,9 @@
         }
     ],
     "keywords": [
-        "OpenSearch",
-        "Open Search",
+        "Elastic",
+        "Elasticsearch",
+        "Elastic Search",
         "Search",
         "Silverstripe CMS"
     ],
@@ -19,8 +20,7 @@
         "php": "^8.2",
         "silverstripe/framework": "^5.1",
         "silverstripe/silverstripe-forager": "^1",
-        "opensearch-project/opensearch-php": "^2",
-        "aws/aws-sdk-php": "^3",
+        "elasticsearch/elasticsearch": "^8.18",
         "guzzlehttp/guzzle": "^7"
     },
     "require-dev": {
