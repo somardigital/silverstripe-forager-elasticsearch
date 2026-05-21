@@ -342,11 +342,13 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
             $fields = [];
 
             foreach ($classes as $class) {
-                // Use getFieldsForClass() which returns Field[] (objects honoring
-                // the yml `options:` block), not the raw array-shape from
-                // getIndexConfigurationsForClassName which loses type info.
-                $classFields = $this->getConfiguration()->getFieldsForClass($class) ?? [];
-                $fields = array_merge($fields, $classFields);
+                $classConfig = $this->getConfiguration()
+                    ->getIndexConfigurationsForClassName($class);
+
+                $fields = array_merge(
+                    $fields,
+                    $classConfig[$indexName]['includeClasses'][$class]['fields']
+                );
             }
 
             // Fetch the mappings, as it is currently configured in our application
