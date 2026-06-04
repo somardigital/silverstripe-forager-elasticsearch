@@ -4,6 +4,7 @@
 # IDE
 .vscode
 .idea
+*.swp
 
 # PHP
 composer.lock

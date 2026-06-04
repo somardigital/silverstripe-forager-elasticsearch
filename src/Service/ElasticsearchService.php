@@ -11,7 +11,7 @@ use SilverStripe\Core\Injector\Injectable;
 use SilverStripe\Core\Injector\Injector;
 use SilverStripe\Forager\Exception\IndexConfigurationException;
 use SilverStripe\Forager\Exception\IndexingServiceException;
-use SilverStripe\Forager\Interfaces\BatchDocumentRemovalInterface;
+use SilverStripe\Forager\Interfaces\BatchDocumentInterface;
 use SilverStripe\Forager\Interfaces\DocumentInterface;
 use SilverStripe\Forager\Interfaces\IndexingInterface;
 use SilverStripe\Forager\Schema\Field;
@@ -19,9 +19,8 @@ use SilverStripe\Forager\Service\DocumentBuilder;
 use SilverStripe\Forager\Service\IndexConfiguration;
 use SilverStripe\Forager\Service\Traits\ConfigurationAware;
 
-class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInterface
+class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
 {
-
     use Configurable;
     use ConfigurationAware;
     use Injectable;
@@ -32,7 +31,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
 
     private DocumentBuilder $builder;
 
-    private static bool $variant_is_suffix = true;
+    private static bool $prefix_is_suffix = true;
 
     private static int $max_document_size = 102400;
 
@@ -67,8 +66,11 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
         'term_vector',
     ];
 
-    public function __construct(Client $client, IndexConfiguration $configuration, DocumentBuilder $builder)
-    {
+    public function __construct(
+        Client $client,
+        IndexConfiguration $configuration,
+        DocumentBuilder $builder
+    ) {
         $this->setClient($client);
         $this->setConfiguration($configuration);
         $this->setBuilder($builder);
@@ -94,14 +96,14 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
         return $this->config()->get('max_document_size');
     }
 
-    public function addDocument(DocumentInterface $document): ?string
+    public function addDocument(string $indexSuffix, DocumentInterface $document): ?string
     {
-        $ids = $this->addDocuments([$document]);
+        $ids = $this->addDocuments($indexSuffix, [$document]);
 
         return array_shift($ids);
     }
 
-    public function addDocuments(array $documents): array
+    public function addDocuments(string $indexSuffix, array $documents): array
     {
         $documentMap = $this->getContentMapForDocuments($documents);
         $processedIds = [];
@@ -139,14 +141,14 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
         return array_unique($processedIds);
     }
 
-    public function removeDocument(DocumentInterface $document): ?string
+    public function removeDocument(string $indexSuffix, DocumentInterface $document): ?string
     {
-        $ids = $this->removeDocuments([$document]);
+        $ids = $this->removeDocuments($indexSuffix, [$document]);
 
         return array_shift($ids);
     }
 
-    public function removeDocuments(array $documents): array
+    public function removeDocuments(string $indexSuffix, array $documents): array
     {
         $documentMap = [];
         $processedIds = [];
@@ -160,7 +162,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
                 ));
             }
 
-            $indexes = $this->getConfiguration()->getIndexesForDocument($document);
+            $indexes = $this->getConfiguration()->getIndexConfigurationsForDocument($document);
 
             foreach (array_keys($indexes) as $indexName) {
                 if (!isset($documentMap[$indexName])) {
@@ -203,8 +205,9 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
     }
 
      /**
-     * Forcefully remove all documents from the provided index name. Batches the requests to Elastic based upon the
-     * configured batch size, beginning at page 1 and continuing until the index is empty.
+     * Forcefully remove all documents from the provided index name.
+     * Batches the requests to Elastic based upon the configured batch size,
+     * beginning at page 1 and continuing until the index is empty.
      *
      * @param string $indexName The index name to remove all documents from
      * @return int The total number of documents removed
@@ -225,14 +228,14 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
         return $response['deleted'] ?? 0;
     }
 
-    public function getDocument(string $id): ?DocumentInterface
+    public function getDocument(string $indexSuffix, string $id): ?DocumentInterface
     {
         $result = $this->getDocuments([$id]);
 
         return $result[0] ?? null;
     }
 
-    public function getDocuments(array $ids): array
+    public function getDocuments(string $indexSuffix, array $ids): array
     {
         $docs = [];
         $indexes = $this->getConfiguration()->getIndexes();
@@ -265,11 +268,14 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
         return array_values($docs);
     }
 
-    public function listDocuments(string $indexName, ?int $pageSize = null, int $currentPage = 0): array
-    {
+    public function listDocuments(
+        string $indexSuffix,
+        ?int $pageSize = null,
+        int $currentPage = 0
+    ): array {
         $docs = [];
         $params = [
-            'index' => $this->environmentizeIndex($indexName),
+            'index' => $this->environmentizeIndex($indexSuffix),
             'from' => $currentPage,
         ];
 
@@ -297,18 +303,23 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
         return $docs;
     }
 
-    public function getDocumentTotal(string $indexName): int
+    public function getDocumentTotal(string $indexSuffix): int
     {
         $response = $this->getClient()->count([
-            'index' => $this->environmentizeIndex($indexName),
+            'index' => $this->environmentizeIndex($indexSuffix),
         ]);
 
         return $response['count'] ?? null;
     }
 
+    public function clearIndexDocuments(string $indexSuffix, int $batchSize): int
+    {
+        return $this->removeAllDocuments($this->environmentizeIndex($indexSuffix));
+    }
+
     public function getIndexSettings(string $indexName): array
     {
-        $index = $this->getConfiguration()->getIndexes()[$indexName] ?? null;
+        $index = $this->getConfiguration()->getIndexConfigurations()[$indexName] ?? null;
 
         return $index['settings'] ?? [];
     }
@@ -318,37 +329,33 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
         $indicies = $this->getClient()->indices();
         $schemas = [];
 
-        foreach (array_keys($this->getConfiguration()->getIndexes()) as $indexName) {
+        foreach (array_keys($this->getConfiguration()->getIndexConfigurations()) as $indexName) {
             $this->validateIndex($indexName);
 
             $envIndex = $this->environmentizeIndex($indexName);
             $this->findOrMakeIndex($envIndex);
 
-            // Fetch the mappings, as it currently exists in Elastic
-            // $elasticMappings = $indicies
-            //     ->getMapping(['index' => $envIndex])[$envIndex]['mappings']['properties'] ?? [];
+            $classes = $this->getConfiguration()
+                ->getIndexDataForSuffix($indexName)
+                ->getClasses();
+
+            $fields = [];
+
+            foreach ($classes as $class) {
+                $classConfig = $this->getConfiguration()
+                    ->getIndexConfigurationsForClassName($class);
+
+                $fields = array_merge(
+                    $fields,
+                    $classConfig[$indexName]['includeClasses'][$class]['fields']
+                );
+            }
 
             // Fetch the mappings, as it is currently configured in our application
-            $definedMappings = $this->getMappingsForFields(
-                $this->getConfiguration()->getFieldsForIndex($indexName)
-            );
-
-            // Fetch the settings, as it currently exists in Elastic
-            // $elasticSettings = $indicies
-            //     ->getSettings(['index' => $envIndex])[$envIndex]['settings'] ?? [];
+            $definedMappings = $this->getMappingsForFields($fields);
 
             // Fetch the settings, as it is currently configured in our application
             $definedSettings = $this->getIndexSettings($indexName);
-
-            // Check to see if there are any important differences between our mappings and settings.
-            // If there are, we'll want to update
-            // if (!$this->mappingsRequiresUpdate($definedMappings, $elasticMappings) &&
-            //     !$this->settingsRequiresUpdate($definedSettings, $elasticSettings)) {
-            //     // No updates found, add this to our tracked schemas
-            //     $schemas[$indexName] = true;
-
-            //     continue;
-            // }
 
             // Trigger an update to Elastic with our current configured mappings and settings
             try {
@@ -396,7 +403,9 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
         $envIndex = $this->environmentizeIndex($indexName);
 
         // Fetch the mappings, as configured in our application
-        $definedMappings = $this->getMappingsForFields($this->getConfiguration()->getFieldsForIndex($indexName));
+        $definedMappings = $this->getMappingsForFields(
+            $this->getConfiguration()->getFieldsForIndex($indexName)
+        );
 
         if (count($definedMappings) === 0) {
             return;
@@ -405,6 +414,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
         // Trigger an update to Elastic with mappings
         try {
             $indicies->close(['index' => $envIndex]);
+
             $indicies->putMapping([
                 'index' => $envIndex,
                 'body' => [
@@ -439,6 +449,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
         // Trigger an update to Elastic with settings
         try {
             $indicies->close(['index' => $envIndex]);
+
             $indicies->putSettings([
                 'index' => $envIndex,
                 'body' => [
@@ -467,7 +478,8 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
 
         if (preg_match('/[^a-z0-9_]/', $field)) {
             throw new IndexConfigurationException(sprintf(
-                'Invalid field name: %s. Must contain only lowercase alphanumeric characters and underscores.',
+                'Invalid field name: %s. Must contain only lowercase alphanumeric' .
+                'characters and underscores.',
                 $field
             ));
         }
@@ -475,17 +487,17 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
 
     public function environmentizeIndex(string $indexName): string
     {
-        $variant = IndexConfiguration::singleton()->getIndexVariant();
-        $isSuffix = $this->config()->get('variant_is_suffix');
+        $prefix = IndexConfiguration::singleton()->getIndexPrefix();
+        $isSuffix = $this->config()->get('prefix_is_suffix');
 
-        if ($variant && $isSuffix) {
+        if ($prefix && $isSuffix) {
             // Add as suffix to index name
-            return sprintf('%s_%s', $indexName, $variant);
+            return sprintf('%s_%s', $indexName, $prefix);
         }
 
-        if ($variant) {
+        if ($prefix) {
             // Add as prefix to index name
-            return sprintf('%s_%s', $variant, $indexName);
+            return sprintf('%s_%s', $prefix, $indexName);
         }
 
         return $indexName;
@@ -535,20 +547,20 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
         $properties = [];
 
         /** @var Field $field */
-        foreach ($fields as $field) {
+        foreach ($fields as $fieldName => $field) {
             $property = [
-                'type' => $field->getOption('type') ?? $this->config()->get('default_field_type'),
+                'type' => $field['type'] ?? $this->config()->get('default_field_type'),
             ];
 
             foreach ($validProperties as $propertyName) {
-                if ($field->getOption($propertyName) === null) {
+                if (!isset($field[$propertyName])) {
                     continue;
                 }
 
-                $property[$propertyName] = $field->getOption($propertyName);
+                $property[$propertyName] = $field[$propertyName];
             }
 
-            $properties[$field->getSearchFieldName()] = $property;
+            $properties[$fieldName] = $property;
         }
 
         return $properties;
@@ -560,17 +572,21 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
     private function validateIndex(string $index): void
     {
         $validTypes = $this->config()->get('valid_field_types') ?? [];
-
         $map = [];
 
-        // Loop through each Class that has a definition for this index
-        foreach ($this->getConfiguration()->getClassesForIndex($index) as $class) {
-            // Loop through each field that has been defined for that Class
-            foreach ($this->getConfiguration()->getFieldsForClass($class) as $field) {
-                // Check to see if a Type has been defined, or just default to what we have defined
-                $type = $field->getOption('type') ?? $this->config()->get('default_field_type');
+        $classes = $this->getConfiguration()
+            ->getIndexDataForSuffix($index)
+            ->getClasses();
 
-                // We can't progress if a type that we don't support has been defined
+        foreach ($classes as $class) {
+            $classConfig = $this->getConfiguration()
+                ->getIndexConfigurationsForClassName($class);
+
+            $fields = $classConfig[$index]['includeClasses'][$class]['fields'];
+
+            foreach ($fields as $fieldName => $field) {
+                $type = $field['options']['type'] ?? $this->config()->get('default_field_type');
+
                 if (!in_array($type, $validTypes, true)) {
                     throw new IndexConfigurationException(sprintf(
                         'Invalid field type: %s',
@@ -578,25 +594,20 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
                     ));
                 }
 
-                // Check to see if this field name has been defined by any other Class, and if it has, let's grab what
-                // "type" it was described as
-                $alreadyDefined = $map[$field->getSearchFieldName()] ?? null;
+                $alreadyDefined = $map[$fieldName] ?? null;
 
-                // This field name has been defined by another Class, and it was described as a different type. We
-                // don't support multiple types for a field, so we need to throw an Exception
                 if ($alreadyDefined && $alreadyDefined !== $type) {
                     throw new IndexConfigurationException(sprintf(
                         'Field "%s" is defined twice in the same index with differing types.
                         (%s and %s). Consider changing the field name or explicitly defining
                         the type on each usage',
-                        $field->getSearchFieldName(),
+                        $fieldName,
                         $alreadyDefined,
                         $type
                     ));
                 }
 
-                // Store this field and its type for later comparison
-                $map[$field->getSearchFieldName()] = $type;
+                $map[$fieldName] = $type;
             }
         }
     }
@@ -631,11 +642,14 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
                 continue;
             }
 
-            $indexes = $this->getConfiguration()->getIndexesForDocument($document);
+            $indexes = $this->getConfiguration()->getIndexConfigurationsForDocument($document);
 
             if (!$indexes) {
                 Injector::inst()->get(LoggerInterface::class)->warn(
-                    sprintf('No valid indexes found for document %s, skipping...', $document->getIdentifier())
+                    sprintf(
+                        'No valid indexes found for document %s, skipping...',
+                        $document->getIdentifier()
+                    )
                 );
 
                 continue;
@@ -652,62 +666,4 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentRemovalInt
 
         return $documentMap;
     }
-
-    // private function mappingsRequiresUpdate(array $definedMappings, array $elasticMappings): bool
-    // {
-    //     // First we'll loop through the Elastic mappings to see if any current fields have changed in type. If one
-    //     // or more has, then we know we need to update the mappings, and we can break; early
-    //     foreach ($elasticMappings as $fieldName => $field) {
-    //         $type = $field['type'] ?? null;
-    //         $definedType = $definedMappings[$fieldName]['type'] ?? null;
-
-    //         // This field (potentially) no longer exists in our configured mappings
-    //         if (!$definedType) {
-    //             continue;
-    //         }
-
-    //         // The type has changed. We know we need to update, so we can return now
-    //         if ($definedType !== $type && $definedType !== 'object') {
-    //             return true;
-    //         }
-    //     }
-
-    //     // Next we'll loop through our configuration mappings and see if any new fields exists that we haven't yet
-    //     // defined in the Elastic mappings
-    //     foreach (array_keys($definedMappings) as $fieldName) {
-    //         // Check to see if this field exists in the Elastic mappings
-    //         $existingType = $elasticMappings[$fieldName] ?? null;
-
-    //         // If it doesn't, then we know we need to update, and we can return now
-    //         if (!$existingType) {
-    //             return true;
-    //         }
-    //     }
-
-    //     // We got all the way to the end, and didn't find anything that needed to be updated
-    //     return false;
-    // }
-
-    // private function settingsRequiresUpdate(array $definedSettings, array $elasticSettings): bool
-    // {
-    //     // We'll loop through our configuration settings and see if any new settings exists that we haven't yet
-    //     // defined in the Elastic settings
-    //     foreach (array_keys($definedSettings) as $setting) {
-    //         // Check to see if this field exists in the Elastic settings
-    //         $existingSetting = $elasticSettings[$setting] ?? null;
-
-    //         // If it doesn't, then we know we need to update, and we can return now
-    //         if (!$existingSetting) {
-    //             return true;
-    //         }
-
-    //         // Check to see if the setting value has changed
-    //         if ($existingSetting !== $setting) {
-    //             return true;
-    //         }
-    //     }
-
-    //     // We got all the way to the end, and didn't find anything that needed to be updated
-    //     return false;
-    // }
 }
