@@ -549,7 +549,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         /** @var Field $field */
         foreach ($fields as $fieldName => $field) {
             $property = [
-                'type' => $field['type'] ?? $this->config()->get('default_field_type'),
+                'type' => $field['options']['type'] ?? $this->config()->get('default_field_type'),
             ];
 
             foreach ($validProperties as $propertyName) {
