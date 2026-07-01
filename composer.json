@@ -10,23 +10,22 @@
         }
     ],
     "keywords": [
+        "Silverstripe",
+        "Silverstripe CMS",
+        "Search",
         "Elastic",
         "Elasticsearch",
-        "Elastic Search",
-        "Search",
-        "Silverstripe CMS"
+        "Elastic Search"
     ],
     "require": {
-        "php": "^8.2",
-        "silverstripe/framework": "^6.1",
+        "php": "^8.3",
+        "silverstripe/framework": "^6",
         "silverstripe/silverstripe-forager": "^2",
-        "elasticsearch/elasticsearch": "^8.18",
-        "guzzlehttp/guzzle": "^7"
+        "elasticsearch/elasticsearch": "^9"
     },
     "require-dev": {
-        "silverstripe/recipe-testing": "^3",
-        "tractorcow/silverstripe-fluent": "^7",
-        "slevomat/coding-standard": "~8.8.0"
+        "phpunit/phpunit": "^11",
+        "slevomat/coding-standard": "^8.8"
     },
     "autoload": {
         "psr-4": {
@@ -37,6 +36,7 @@
     "minimum-stability": "dev",
     "prefer-stable": true,
     "config": {
+        "sort-packages": true,
         "allow-plugins": {
             "composer/installers": true,
             "silverstripe/vendor-plugin": true,

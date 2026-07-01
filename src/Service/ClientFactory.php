@@ -9,6 +9,7 @@ use SilverStripe\Core\Injector\Factory;
 
 class ClientFactory implements Factory
 {
+
     /**
      * @throws Exception
      */
@@ -51,4 +52,5 @@ class ClientFactory implements Factory
 
         return $builder->build();
     }
+
 }

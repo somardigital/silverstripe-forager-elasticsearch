@@ -1,0 +1,18 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - "main"
+      - "release/**"
+      - "feature/**"
+  push:
+    branches:
+      - "main"
+  workflow_dispatch:
+
+jobs:
+  ci:
+    uses: silverstripe/gha-ci/.github/workflows/ci.yml@v2
+    with:
+      js: false
