@@ -106,5 +106,6 @@ to you are:
 
 ## Credits
 
-This module is based on the
-[silverstripe-forager-elastic-enterprise](https://github.com/silverstripeltd/silverstripe-forager-elastic-enterprise) module
+This module is based on the following modules:
+- [silverstripe-forager-elastic-enterprise](https://github.com/silverstripeltd/silverstripe-forager-elastic-enterprise)
+- [silverstripe-forager-bifrost](https://github.com/silverstripeltd/silverstripe-forager-bifrost)
