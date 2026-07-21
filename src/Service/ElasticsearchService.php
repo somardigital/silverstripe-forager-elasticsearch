@@ -9,6 +9,7 @@ use SilverStripe\Core\Config\Configurable;
 use SilverStripe\Core\Environment;
 use SilverStripe\Core\Injector\Injectable;
 use SilverStripe\Core\Injector\Injector;
+use SilverStripe\Forager\DataObject\DataObjectDocument;
 use SilverStripe\Forager\Exception\IndexConfigurationException;
 use SilverStripe\Forager\Exception\IndexingServiceException;
 use SilverStripe\Forager\Interfaces\BatchDocumentInterface;
@@ -377,7 +378,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         ])->asBool();
     }
 
-    protected function createIndex(string $indexSuffix): void
+    public function createIndex(string $indexSuffix): void
     {
         $definedSettings = $this->getIndexConfigurationSettings($indexSuffix);
 
@@ -401,13 +402,13 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         }
     }
 
-    protected function updateIndex(string $indexSuffix): void
+    public function updateIndex(string $indexSuffix): void
     {
         $this->updateIndexSettings($indexSuffix);
         $this->updateIndexMappings($indexSuffix);
     }
 
-    protected function updateIndexSettings(string $indexSuffix): void
+    public function updateIndexSettings(string $indexSuffix): void
     {
         $definedSettings = $this->getIndexConfigurationSettings($indexSuffix);
 
@@ -427,7 +428,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         }
     }
 
-    protected function updateIndexMappings(string $indexSuffix): void
+    public function updateIndexMappings(string $indexSuffix): void
     {
         $definedMappings = $this->getIndexConfigurationMappings($indexSuffix);
 
@@ -447,14 +448,14 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         }
     }
 
-    protected function getIndexConfigurationSettings(string $indexSuffix): array
+    public function getIndexConfigurationSettings(string $indexSuffix): array
     {
         $index = $this->getConfiguration()->getIndexConfigurations()[$indexSuffix] ?? null;
 
         return $index['settings'] ?? [];
     }
 
-    protected function getIndexConfigurationMappings(string $indexSuffix): array
+    public function getIndexConfigurationMappings(string $indexSuffix): array
     {
         $fields = $this->getConfiguration()
             ->getIndexDataForSuffix($indexSuffix)
@@ -463,8 +464,18 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         $validProperties = $this->config()->get('valid_field_properties') ?? [];
         $properties = [];
 
+        $sourceClassField = IndexConfiguration::singleton()->getSourceClassField();
+        $baseClassField = DataObjectDocument::config()->get('base_class_field');
+        $recordIdField = DataObjectDocument::config()->get('record_id_field');
+
         /** @var Field $field */
         foreach ($fields as $fieldName => $field) {
+            if (in_array($fieldName, [$sourceClassField, $baseClassField], true)) {
+                $field->setOption('type', 'keyword');
+            } elseif ($fieldName === $recordIdField) {
+                $field->setOption('type', 'long');
+            }
+
             $property = [
                 'type' => $field->getOption('type') ?? $this->config()->get('default_field_type'),
             ];
@@ -486,7 +497,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
     /**
      * @throws IndexConfigurationException
      */
-    protected function validateIndexConfiguration(string $index): void
+    public function validateIndexConfiguration(string $index): void
     {
         $validTypes = array_filter(array_values($this->config()->get('valid_field_types'))) ?? [];
 
