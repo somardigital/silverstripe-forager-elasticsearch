@@ -123,10 +123,10 @@ to you are:
 
 Support for searching is provided through the discoverer module:
 
-* [silverstripe-forager-elasticsearch](https://github.com/somardigital/silverstripe-discoverer-elasticsearch)
+* [silverstripe-discoverer-elasticsearch](https://github.com/somardigital/silverstripe-discoverer-elasticsearch)
 
 ## Credits
 
-This module has taken inspiration following modules:
+This module has taken inspiration from the following modules:
 - [silverstripe-forager-elastic-enterprise](https://github.com/silverstripeltd/silverstripe-forager-elastic-enterprise)
 - [silverstripe-forager-bifrost](https://github.com/silverstripeltd/silverstripe-forager-bifrost)

@@ -81,11 +81,11 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         'chunking_settings',
     ];
 
-    public function __construct(Client $client, IndexConfiguration $configuration, DocumentBuilder $exporter)
+    public function __construct(Client $client, IndexConfiguration $configuration, DocumentBuilder $builder)
     {
         $this->setClient($client);
         $this->setConfiguration($configuration);
-        $this->setBuilder($exporter);
+        $this->setBuilder($builder);
     }
 
     public function getExternalURL(): ?string
@@ -211,18 +211,26 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
 
     public function clearIndexDocuments(string $indexSuffix, int $batchSize): int
     {
-        $response = $this->getClient()->deleteByQuery([
-            'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
-            'conflicts' => 'proceed',
-            'allow_no_indices' => false,
-            'body' => [
-                'query' => [
-                    'match_all' => new stdClass(),
-                ],
-            ],
-        ]);
+        $deleted = 0;
 
-        return $response['deleted'] ?? 0;
+        do {
+            $response = $this->getClient()->deleteByQuery([
+                'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
+                'conflicts' => 'proceed',
+                'allow_no_indices' => false,
+                'max_docs' => $batchSize,
+                'body' => [
+                    'query' => [
+                        'match_all' => new stdClass(),
+                    ],
+                ],
+            ]);
+
+            $batchDeleted = $response['deleted'] ?? 0;
+            $deleted += $batchDeleted;
+        } while ($batchDeleted === $batchSize);
+
+        return $deleted;
     }
 
     public function getDocument(string $indexSuffix, string $id): ?DocumentInterface
@@ -250,7 +258,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         }
 
         foreach ($results as $data) {
-            if (($data['found'] ?? true) === false) {
+            if (($data['found'] ?? true) === false || !isset($data['_source'])) {
                 continue;
             }
 
@@ -271,7 +279,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
     {
         $params = [
             'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
-            'from' => $currentPage - 1,
+            'from' => ($currentPage - 1) * ($pageSize ?? 10),
         ];
 
         if ($pageSize) {
