@@ -1,17 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<phpunit bootstrap="vendor/silverstripe/framework/tests/bootstrap.php" colors="true">
-    <testsuites>
-        <testsuite name="Default">
-            <directory>tests</directory>
-        </testsuite>
-    </testsuites>
-
+<phpunit
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    bootstrap="vendor/silverstripe/framework/tests/bootstrap.php"
+    colors="true"
+    xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/11.5/phpunit.xsd"
+    cacheDirectory=".phpunit.cache"
+>
+    <php>
+        <env name="ELASTIC_SEARCH_ENDPOINT" value="http://localhost:9200" force="true"/>
+        <env name="ELASTIC_SEARCH_API_KEY" value="fakeApiKey" force="true"/>
+    </php>
+    <testsuite name="Default">
+        <directory>tests</directory>
+    </testsuite>
     <source>
         <include>
-            <directory suffix=".php">src/</directory>
+            <directory suffix=".php">src</directory>
         </include>
-        <exclude>
-            <directory suffix=".php">tests/</directory>
-        </exclude>
     </source>
 </phpunit>
