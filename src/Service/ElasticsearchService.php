@@ -169,11 +169,14 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
     {
         $processedIds = [];
 
-        $body = array_map(static function ($document) {
+        // Capture the method name to use in closure exception messages
+        $method = __METHOD__;
+
+        $body = array_map(static function ($document) use ($method) {
             if (!$document instanceof DocumentInterface) {
                 throw new InvalidArgumentException(sprintf(
                     '%s not passed an instance of %s',
-                    __FUNCTION__,
+                    $method,
                     DocumentInterface::class
                 ));
             }
@@ -396,9 +399,10 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
             $this->getClient()->indices()->create([
                 'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
                 'body' => [
-                    'settings' => $definedSettings,
+                    // Empty PHP arrays encode as JSON arrays, but Elasticsearch requires objects here
+                    'settings' => $definedSettings ?: new stdClass(),
                     'mappings' => [
-                        'properties' => $definedMappings,
+                        'properties' => $definedMappings ?: new stdClass(),
                     ],
                 ],
             ]);
@@ -425,7 +429,8 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
                 'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
                 'reopen' => true,
                 'body' => [
-                    'settings' => $definedSettings,
+                    // Empty PHP arrays encode as JSON arrays, but Elasticsearch requires objects here
+                    'settings' => $definedSettings ?: new stdClass(),
                 ],
             ]);
         } catch (Throwable $e) {
@@ -443,9 +448,9 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         try {
             $this->getClient()->indices()->putMapping([
                 'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
-                'reopen' => true,
                 'body' => [
-                    'properties' => $definedMappings,
+                    // Empty PHP arrays encode as JSON arrays, but Elasticsearch requires objects here
+                    'properties' => $definedMappings ?: new stdClass(),
                 ],
             ]);
         } catch (Throwable $e) {

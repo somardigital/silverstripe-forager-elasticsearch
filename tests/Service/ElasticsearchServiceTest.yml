@@ -1,0 +1,13 @@
+Somar\ForagerElasticsearch\Tests\Fake\DataObjectFake:
+  one:
+    Title: Dataobject one
+    Sort: 1
+    ShowInSearch: 1
+  two:
+    Title: Dataobject two
+    Sort: 2
+    ShowInSearch: 0
+  three:
+    Title: Dataobject three
+    Sort: 3
+    ShowInSearch: 1
