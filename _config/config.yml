@@ -1,5 +1,5 @@
 ---
-Name: silverstripe-forager-elasticsearch
+Name: forager-elasticsearch
 Only:
   envvarset: 'ELASTIC_SEARCH_API_KEY'
 After:
@@ -24,9 +24,3 @@ SilverStripe\Core\Injector\Injector:
       api_id: '`ELASTIC_SEARCH_API_ID`'
       api_key: '`ELASTIC_SEARCH_API_KEY`'
       http_client: '%$GuzzleHttp\Client'
-
-## customise the dataobject fields for ElasticSearch compatability
-SilverStripe\Forager\DataObject\DataObjectDocument:
-  id_field: record_id
-  base_class_field: record_base_class
-  page_content_field: page_content

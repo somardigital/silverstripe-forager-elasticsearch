@@ -10,23 +10,26 @@ This module **does not** provide any method for performing searches on your engi
 
 ## Installation
 
-`composer require somardigital/silverstripe-forager-elasticsearch`
-
-## Activating Elasticsearch
-
-To start using Elasticsearch, define environment variables containing your API key, endpoint, and
-variant.
-
+```shell
+composer require somardigital/silverstripe-forager-elasticsearch
 ```
+
+## Configuration
+
+Set an API key and either an endpoint or Elastic Cloud ID:
+
+```dotenv
 ELASTIC_SEARCH_ENDPOINT="https://abc123.ap-southeast-2.aws.found.io"
-ELASTIC_SEARCH_CLOUD_ID="xxx:abc123==" # Alternative to endpoint
-ELASTIC_SEARCH_INDEX_PREFIX="dev"
+ELASTIC_SEARCH_CLOUD_ID="xxx:abc123==" # Alternative to ELASTIC_SEARCH_ENDPOINT
 ELASTIC_SEARCH_API_KEY="abc123"
-ELASTIC_SEARCH_API_ID="xxx" # Only required if Api Key does not contain Api ID in base64 encodeed string
+ELASTIC_SEARCH_API_ID="xxx" # Only required if API Key does not contain API ID in base64 encoded string
 ELASTIC_SEARCH_DASHBOARD="https://abc123.ap-southeast-2.aws.found.io:9243"
+ELASTIC_SEARCH_INDEX_PREFIX="dev"
 ```
 
-## Configuring Elasticsearch
+`ELASTIC_SEARCH_INDEX_PREFIX` is optional. If set, Forager indexes suffixes are prefixed as `<prefix>-<suffix>`.
+
+## Usage
 
 The most notable configuration surface for Elasticsearch is the schema, which determines how data is stored in your
 Elasticsearch index (engine). There are the following types of data currently configured in this module:
@@ -44,6 +47,9 @@ Elasticsearch index (engine). There are the following types of data currently co
 - `point`
 - `object`
 - `nested`
+- `semantic_text`
+- `dense_vector`
+- `search_as_you_type`
 
 The following additional options are available:
 - `fields`
@@ -56,6 +62,16 @@ The following additional options are available:
 - `properties`
 - `store`
 - `term_vector`
+- `similarity`
+- `index_options`
+- `analyzer`
+- `search_analyzer`
+- `normalizer`
+- `dims`
+- `scaling_factor`
+- `inference_id`
+- `search_inference_id`
+- `chunking_settings`
 
 You can specify these data types in the `options` node of your fields.
 
@@ -75,8 +91,7 @@ SilverStripe\Forager\Service\IndexConfiguration:
 
 ```
 
-**Note**: Be careful about whimsically changing your schema. ElasticSearch may need to be fully reindexed if you
-change the name of a field. Fields cannot be deleted so re-naming one will leave any previously created fields around.
+**Note**: Be careful about whimsically changing your schema. Elasticsearch may need to be fully reindexed if you change the name of a field. Fields cannot be deleted so re-naming one will leave any previously created fields around.
 
 ## Indexing File Content
 
@@ -104,7 +119,14 @@ to you are:
 - [Configuration](https://github.com/silverstripeltd/silverstripe-forager/blob/1/docs/en/configuration.md)
 - [Customisation](https://github.com/silverstripeltd/silverstripe-forager/blob/1/docs/en/customising.md)
 
+## Searching
+
+Support for searching is provided through the discoverer module:
+
+* [silverstripe-discoverer-elasticsearch](https://github.com/somardigital/silverstripe-discoverer-elasticsearch)
+
 ## Credits
 
-This module is based on the
-[silverstripe-forager-elastic-enterprise](https://github.com/silverstripeltd/silverstripe-forager-elastic-enterprise) module
+This module has taken inspiration from the following modules:
+- [silverstripe-forager-elastic-enterprise](https://github.com/silverstripeltd/silverstripe-forager-elastic-enterprise)
+- [silverstripe-forager-bifrost](https://github.com/silverstripeltd/silverstripe-forager-bifrost)

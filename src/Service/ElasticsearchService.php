@@ -9,6 +9,7 @@ use SilverStripe\Core\Config\Configurable;
 use SilverStripe\Core\Environment;
 use SilverStripe\Core\Injector\Injectable;
 use SilverStripe\Core\Injector\Injector;
+use SilverStripe\Forager\DataObject\DataObjectDocument;
 use SilverStripe\Forager\Exception\IndexConfigurationException;
 use SilverStripe\Forager\Exception\IndexingServiceException;
 use SilverStripe\Forager\Interfaces\BatchDocumentInterface;
@@ -18,22 +19,23 @@ use SilverStripe\Forager\Schema\Field;
 use SilverStripe\Forager\Service\DocumentBuilder;
 use SilverStripe\Forager\Service\IndexConfiguration;
 use SilverStripe\Forager\Service\Traits\ConfigurationAware;
+use stdClass;
+use Throwable;
 
 class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
 {
+
     use Configurable;
     use ConfigurationAware;
     use Injectable;
 
-    private const DEFAULT_FIELD_TYPE = 'text';
+    private const string DEFAULT_FIELD_TYPE = 'text';
 
     private Client $client;
 
     private DocumentBuilder $builder;
 
-    private static bool $prefix_is_suffix = true;
-
-    private static int $max_document_size = 102400;
+    private static int $max_document_size = 10485760;
 
     private static string $default_field_type = self::DEFAULT_FIELD_TYPE;
 
@@ -51,6 +53,9 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         'object',
         'nested',
         'text',
+        'semantic_text',
+        'dense_vector',
+        'search_as_you_type',
     ];
 
     private static array $valid_field_properties = [
@@ -64,13 +69,20 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         'properties',
         'store',
         'term_vector',
+        'similarity',
+        'index_options',
+        'analyzer',
+        'search_analyzer',
+        'normalizer',
+        'dims',
+        'scaling_factor',
+        'inference_id',
+        'search_inference_id',
+        'chunking_settings',
     ];
 
-    public function __construct(
-        Client $client,
-        IndexConfiguration $configuration,
-        DocumentBuilder $builder
-    ) {
+    public function __construct(Client $client, IndexConfiguration $configuration, DocumentBuilder $builder)
+    {
         $this->setClient($client);
         $this->setConfiguration($configuration);
         $this->setBuilder($builder);
@@ -98,44 +110,49 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
 
     public function addDocument(string $indexSuffix, DocumentInterface $document): ?string
     {
-        $ids = $this->addDocuments($indexSuffix, [$document]);
+        $processedIds = $this->addDocuments($indexSuffix, [$document]);
 
-        return array_shift($ids);
+        return array_shift($processedIds);
     }
 
+    /**
+     * @throws IndexingServiceException
+     * @link https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-bulk
+     */
     public function addDocuments(string $indexSuffix, array $documents): array
     {
-        $documentMap = $this->getContentMapForDocuments($documents);
+        $documentsArray = $this->getContentMapForDocuments($indexSuffix, $documents);
         $processedIds = [];
 
-        foreach ($documentMap as $index => $docsToAdd) {
-            $envIndex = $this->environmentizeIndex($index);
-            $body = [];
+        if (!$documentsArray) {
+            return [];
+        }
 
-            foreach ($docsToAdd as $document) {
-                $body[] = [
-                    'index' => [
-                        '_index' => $envIndex,
-                        '_id' => $document['id'],
-                    ],
-                ];
-                $body[] = $document;
+        $body = [];
+
+        foreach ($documentsArray as $document) {
+            $body[] = [
+                'index' => [
+                    '_id' => $document['id'],
+                ],
+            ];
+            $body[] = $document;
+        }
+
+        $response = $this->getClient()->bulk([
+            'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
+            'body' => $body,
+        ]);
+
+        // Grab all the ID values, and also cast them to string
+        foreach ($response['items'] as $item) {
+            if (isset($item['index']['error'])) {
+                throw new IndexingServiceException(
+                    sprintf('Failed to index document: %s', $item['index']['error']['reason'])
+                );
             }
 
-            $response = $this->getClient()->bulk([
-                'body' => $body,
-            ]);
-
-            // Grab all the ID values, and also cast them to string
-            foreach ($response['items'] as $item) {
-                if (isset($item['index']['error'])) {
-                    throw new IndexingServiceException(
-                        sprintf('Failed to index document: %s', $item['index']['error']['reason'])
-                    );
-                }
-
-                $processedIds[] = strval($item['index']['_id']);
-            }
+            $processedIds[] = strval($item['index']['_id']);
         }
 
         return array_unique($processedIds);
@@ -143,94 +160,85 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
 
     public function removeDocument(string $indexSuffix, DocumentInterface $document): ?string
     {
-        $ids = $this->removeDocuments($indexSuffix, [$document]);
+        $processedIds = $this->removeDocuments($indexSuffix, [$document]);
 
-        return array_shift($ids);
+        return array_shift($processedIds);
     }
 
     public function removeDocuments(string $indexSuffix, array $documents): array
     {
-        $documentMap = [];
         $processedIds = [];
 
-        foreach ($documents as $document) {
+        // Capture the method name to use in closure exception messages
+        $method = __METHOD__;
+
+        $body = array_map(static function ($document) use ($method) {
             if (!$document instanceof DocumentInterface) {
                 throw new InvalidArgumentException(sprintf(
                     '%s not passed an instance of %s',
-                    __FUNCTION__,
+                    $method,
                     DocumentInterface::class
                 ));
             }
 
-            $indexes = $this->getConfiguration()->getIndexConfigurationsForDocument($document);
+            return [
+                'delete' => [
+                    '_id' => $document->getIdentifier(),
+                ],
+            ];
+        }, $documents);
 
-            foreach (array_keys($indexes) as $indexName) {
-                if (!isset($documentMap[$indexName])) {
-                    $documentMap[$indexName] = [];
-                }
-
-                $documentMap[$indexName][] = $document->getIdentifier();
-            }
+        if (!$body) {
+            return [];
         }
 
-        foreach ($documentMap as $indexName => $idsToRemove) {
-            $envIndex = $this->environmentizeIndex($indexName);
-            $body = array_map(static function ($id) use ($envIndex) {
-                return [
-                    'delete' => [
-                        '_index' => $envIndex,
-                        '_id' => $id,
-                    ],
-                ];
-            }, $idsToRemove);
+        $response = $this->getClient()->bulk([
+            'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
+            'body' => $body,
+        ]);
 
-            $response = $this->getClient()->bulk([
-                'body' => $body,
-            ]);
-
-            // Grab all the ID values, and also cast them to string
-            foreach ($response['items'] as $item) {
-                if (isset($item['delete']['error'])) {
-                    throw new IndexingServiceException(
-                        sprintf('Failed to remove document: %s', $item['delete']['error']['reason'])
-                    );
-                }
-
-                $processedIds[] = strval($item['delete']['_id']);
+        // Grab all the ID values, and also cast them to string
+        foreach ($response['items'] as $item) {
+            if (isset($item['delete']['error'])) {
+                throw new IndexingServiceException(
+                    sprintf('Failed to remove document: %s', $item['delete']['error']['reason'])
+                );
             }
+
+            $processedIds[] = strval($item['delete']['_id']);
         }
 
         // One document could have existed in multiple indexes, we only care to track it once
         return array_unique($processedIds);
     }
 
-     /**
-     * Forcefully remove all documents from the provided index name.
-     * Batches the requests to Elastic based upon the configured batch size,
-     * beginning at page 1 and continuing until the index is empty.
-     *
-     * @param string $indexName The index name to remove all documents from
-     * @return int The total number of documents removed
-     */
-    public function removeAllDocuments(string $indexName): int
+    public function clearIndexDocuments(string $indexSuffix, int $batchSize): int
     {
-        $response = $this->getClient()->deleteByQuery([
-            'index' => $this->environmentizeIndex($indexName),
-            'conflicts' => 'proceed',
-            'allow_no_indices' => false,
-            'body' => [
-                'query' => [
-                    'match_all' => new \stdClass(),
-                ],
-            ],
-        ]);
+        $deleted = 0;
 
-        return $response['deleted'] ?? 0;
+        do {
+            $response = $this->getClient()->deleteByQuery([
+                'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
+                'conflicts' => 'proceed',
+                'allow_no_indices' => false,
+                'max_docs' => $batchSize,
+                'body' => [
+                    'query' => [
+                        'match_all' => new stdClass(),
+                    ],
+                ],
+            ]);
+
+            $batchDeleted = $response['deleted'] ?? 0;
+            $deleted += $batchDeleted;
+        } while ($batchDeleted === $batchSize);
+
+        return $deleted;
     }
 
     public function getDocument(string $indexSuffix, string $id): ?DocumentInterface
     {
-        $result = $this->getDocuments([$id]);
+        $result = $this->getDocuments($indexSuffix, [$id]);
 
         return $result[0] ?? null;
     }
@@ -238,45 +246,43 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
     public function getDocuments(string $indexSuffix, array $ids): array
     {
         $docs = [];
-        $indexes = $this->getConfiguration()->getIndexes();
 
-        foreach (array_keys($indexes) as $index) {
-            $response = $this->getClient()->mget([
-                'index' => $this->environmentizeIndex($index),
-                'body' => [
-                    'ids' => $ids,
-                ],
-            ]);
+        $response = $this->getClient()->mget([
+            'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
+            'body' => [
+                'ids' => $ids,
+            ],
+        ]);
 
-            $results = $response['hits']['hits'] ?? null;
+        $results = $response['docs'] ?? null;
 
-            if (!$results) {
+        if (!$results) {
+            return [];
+        }
+
+        foreach ($results as $data) {
+            if (($data['found'] ?? true) === false || !isset($data['_source'])) {
                 continue;
             }
 
-            foreach ($results as $data) {
-                $document = $this->getBuilder()->fromArray($data);
+            $document = $this->getBuilder()->fromArray((array) $data['_source']);
 
-                if (!$document) {
-                    continue;
-                }
-
-                $docs[$document->getIdentifier()] = $document;
+            if (!$document) {
+                continue;
             }
+
+            // Stored by identifier as the key
+            $docs[$document->getIdentifier()] = $document;
         }
 
         return array_values($docs);
     }
 
-    public function listDocuments(
-        string $indexSuffix,
-        ?int $pageSize = null,
-        int $currentPage = 0
-    ): array {
-        $docs = [];
+    public function listDocuments(string $indexSuffix, ?int $pageSize = null, int $currentPage = 1): array
+    {
         $params = [
-            'index' => $this->environmentizeIndex($indexSuffix),
-            'from' => $currentPage,
+            'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
+            'from' => ($currentPage - 1) * ($pageSize ?? 10),
         ];
 
         if ($pageSize) {
@@ -284,187 +290,54 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         }
 
         $response = $this->getClient()->search($params);
-        $results = $response['results'] ?? null;
+        $results = $response['hits']['hits'] ?? null;
 
         if (!$results) {
             return [];
         }
 
+        $documents = [];
+
         foreach ($results as $data) {
-            $document = $this->getBuilder()->fromArray($data);
+            $document = $this->getBuilder()->fromArray((array) $data['_source']);
 
             if (!$document) {
                 continue;
             }
 
-            $docs[] = $document;
+            $documents[] = $document;
         }
 
-        return $docs;
+        return $documents;
     }
 
     public function getDocumentTotal(string $indexSuffix): int
     {
         $response = $this->getClient()->count([
-            'index' => $this->environmentizeIndex($indexSuffix),
+            'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
         ]);
 
-        return $response['count'] ?? null;
-    }
-
-    public function clearIndexDocuments(string $indexSuffix, int $batchSize): int
-    {
-        return $this->removeAllDocuments($this->environmentizeIndex($indexSuffix));
-    }
-
-    public function getIndexSettings(string $indexName): array
-    {
-        $index = $this->getConfiguration()->getIndexConfigurations()[$indexName] ?? null;
-
-        return $index['settings'] ?? [];
+        return (int) ($response['count'] ?? 0);
     }
 
     public function configure(): array
     {
-        $indicies = $this->getClient()->indices();
         $schemas = [];
 
-        foreach (array_keys($this->getConfiguration()->getIndexConfigurations()) as $indexName) {
-            $this->validateIndex($indexName);
+        foreach (array_keys($this->getConfiguration()->getIndexConfigurations()) as $indexSuffix) {
+            $this->validateIndexConfiguration($indexSuffix);
 
-            $envIndex = $this->environmentizeIndex($indexName);
-            $this->findOrMakeIndex($envIndex);
-
-            $classes = $this->getConfiguration()
-                ->getIndexDataForSuffix($indexName)
-                ->getClasses();
-
-            $fields = [];
-
-            foreach ($classes as $class) {
-                $classConfig = $this->getConfiguration()
-                    ->getIndexConfigurationsForClassName($class);
-
-                $fields = array_merge(
-                    $fields,
-                    $classConfig[$indexName]['includeClasses'][$class]['fields']
-                );
-            }
-
-            // Fetch the mappings, as it is currently configured in our application
-            $definedMappings = $this->getMappingsForFields($fields);
-
-            // Fetch the settings, as it is currently configured in our application
-            $definedSettings = $this->getIndexSettings($indexName);
-
-            // Trigger an update to Elastic with our current configured mappings and settings
-            try {
-                $indicies->close(['index' => $envIndex]);
-
-                if (count($definedMappings) > 0) {
-                    $indicies->putMapping([
-                        'index' => $envIndex,
-                        'body' => [
-                            'properties' => $definedMappings,
-                        ],
-                    ]);
-                }
-
-                if (count($definedSettings) > 0) {
-                    $indicies->putSettings([
-                        'index' => $envIndex,
-                        'body' => [
-                            'settings' => $definedSettings,
-                        ],
-                    ]);
-                }
-            } catch (\Throwable $e) {
-                throw new IndexingServiceException(sprintf(
-                    'Failed to update index mapping and settings: %s',
-                    $e->getMessage(),
-                ));
-            } finally {
-                // Make sure we re-open the index, regardless of the outcome
-                $indicies->open(['index' => $envIndex]);
+            if (!$this->indexExists($indexSuffix)) {
+                $this->createIndex($indexSuffix);
+            } else {
+                $this->updateIndex($indexSuffix);
             }
 
             // Add this updated schema to our tracked schemas
-            $schemas[$indexName] = true;
+            $schemas[$indexSuffix] = true;
         }
 
         return $schemas;
-    }
-
-    public function configureIndexMappings(string $indexName): void
-    {
-        $this->validateIndex($indexName);
-
-        $indicies = $this->getClient()->indices();
-        $envIndex = $this->environmentizeIndex($indexName);
-
-        // Fetch the mappings, as configured in our application
-        $definedMappings = $this->getMappingsForFields(
-            $this->getConfiguration()->getFieldsForIndex($indexName)
-        );
-
-        if (count($definedMappings) === 0) {
-            return;
-        }
-
-        // Trigger an update to Elastic with mappings
-        try {
-            $indicies->close(['index' => $envIndex]);
-
-            $indicies->putMapping([
-                'index' => $envIndex,
-                'body' => [
-                    'properties' => $definedMappings,
-                ],
-            ]);
-        } catch (\Throwable $e) {
-            throw new IndexingServiceException(sprintf(
-                'Failed to update index mapping: %s',
-                $e->getMessage(),
-            ));
-        } finally {
-            // Make sure we re-open the index, regardless of the outcome
-            $indicies->open(['index' => $envIndex]);
-        }
-    }
-
-    public function configureIndexSettings(string $indexName): void
-    {
-        $this->validateIndex($indexName);
-
-        $indicies = $this->getClient()->indices();
-        $envIndex = $this->environmentizeIndex($indexName);
-
-        // Fetch the settings, as configured in our application
-        $definedSettings = $this->getIndexSettings($indexName);
-
-        if (count($definedSettings) === 0) {
-            return;
-        }
-
-        // Trigger an update to Elastic with settings
-        try {
-            $indicies->close(['index' => $envIndex]);
-
-            $indicies->putSettings([
-                'index' => $envIndex,
-                'body' => [
-                    'settings' => $definedSettings,
-                ],
-            ]);
-        } catch (\Throwable $e) {
-            throw new IndexingServiceException(sprintf(
-                'Failed to update index settings: %s',
-                $e->getMessage(),
-            ));
-        } finally {
-            // Make sure we re-open the index, regardless of the outcome
-            $indicies->open(['index' => $envIndex]);
-        }
     }
 
     public function validateField(string $field): void
@@ -479,28 +352,10 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         if (preg_match('/[^a-z0-9_]/', $field)) {
             throw new IndexConfigurationException(sprintf(
                 'Invalid field name: %s. Must contain only lowercase alphanumeric' .
-                'characters and underscores.',
+                    'characters and underscores.',
                 $field
             ));
         }
-    }
-
-    public function environmentizeIndex(string $indexName): string
-    {
-        $prefix = IndexConfiguration::singleton()->getIndexPrefix();
-        $isSuffix = $this->config()->get('prefix_is_suffix');
-
-        if ($prefix && $isSuffix) {
-            // Add as suffix to index name
-            return sprintf('%s_%s', $indexName, $prefix);
-        }
-
-        if ($prefix) {
-            // Add as prefix to index name
-            return sprintf('%s_%s', $prefix, $indexName);
-        }
-
-        return $indexName;
     }
 
     public function getClient(): Client
@@ -513,51 +368,137 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
         return $this->builder;
     }
 
-    public function setClient(Client $client): ElasticsearchService
+    public function setClient(Client $client): static
     {
         $this->client = $client;
 
         return $this;
     }
 
-    public function setBuilder(DocumentBuilder $builder): ElasticsearchService
+    public function setBuilder(DocumentBuilder $builder): static
     {
         $this->builder = $builder;
 
         return $this;
     }
 
-    private function findOrMakeIndex(string $index): void
+    protected function indexExists(string $indexSuffix): bool
     {
-        $indices = $this->getClient()->indices();
-
-        if ($indices->exists(['index' => $index])->asBool()) {
-            return;
-        }
-
-        $indices->create(['index' => $index]);
+        return $this->getClient()->indices()->exists([
+            'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
+        ])->asBool();
     }
 
-    /**
-     * @param Field[] $fields
-     */
-    private function getMappingsForFields(array $fields): array
+    public function createIndex(string $indexSuffix): void
     {
+        $definedSettings = $this->getIndexConfigurationSettings($indexSuffix);
+
+        $definedMappings = $this->getIndexConfigurationMappings($indexSuffix);
+
+        try {
+            $this->getClient()->indices()->create([
+                'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
+                'body' => [
+                    // Empty PHP arrays encode as JSON arrays, but Elasticsearch requires objects here
+                    'settings' => $definedSettings ?: new stdClass(),
+                    'mappings' => [
+                        'properties' => $definedMappings ?: new stdClass(),
+                    ],
+                ],
+            ]);
+        } catch (Throwable $e) {
+            throw new IndexingServiceException(sprintf(
+                'Failed to create index: %s',
+                $e->getMessage(),
+            ));
+        }
+    }
+
+    public function updateIndex(string $indexSuffix): void
+    {
+        $this->updateIndexSettings($indexSuffix);
+        $this->updateIndexMappings($indexSuffix);
+    }
+
+    public function updateIndexSettings(string $indexSuffix): void
+    {
+        $definedSettings = $this->getIndexConfigurationSettings($indexSuffix);
+
+        try {
+            $this->getClient()->indices()->putSettings([
+                'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
+                'reopen' => true,
+                'body' => [
+                    // Empty PHP arrays encode as JSON arrays, but Elasticsearch requires objects here
+                    'settings' => $definedSettings ?: new stdClass(),
+                ],
+            ]);
+        } catch (Throwable $e) {
+            throw new IndexingServiceException(sprintf(
+                'Failed to update index settings: %s',
+                $e->getMessage(),
+            ));
+        }
+    }
+
+    public function updateIndexMappings(string $indexSuffix): void
+    {
+        $definedMappings = $this->getIndexConfigurationMappings($indexSuffix);
+
+        try {
+            $this->getClient()->indices()->putMapping([
+                'index' => $this->getConfiguration()->environmentizeIndex($indexSuffix),
+                'body' => [
+                    // Empty PHP arrays encode as JSON arrays, but Elasticsearch requires objects here
+                    'properties' => $definedMappings ?: new stdClass(),
+                ],
+            ]);
+        } catch (Throwable $e) {
+            throw new IndexingServiceException(sprintf(
+                'Failed to update index mapping: %s',
+                $e->getMessage(),
+            ));
+        }
+    }
+
+    public function getIndexConfigurationSettings(string $indexSuffix): array
+    {
+        $index = $this->getConfiguration()->getIndexConfigurations()[$indexSuffix] ?? null;
+
+        return $index['settings'] ?? [];
+    }
+
+    public function getIndexConfigurationMappings(string $indexSuffix): array
+    {
+        $fields = $this->getConfiguration()
+            ->getIndexDataForSuffix($indexSuffix)
+            ->getFields();
+
         $validProperties = $this->config()->get('valid_field_properties') ?? [];
         $properties = [];
 
+        $sourceClassField = IndexConfiguration::singleton()->getSourceClassField();
+        $baseClassField = DataObjectDocument::config()->get('base_class_field');
+        $recordIdField = DataObjectDocument::config()->get('record_id_field');
+
         /** @var Field $field */
         foreach ($fields as $fieldName => $field) {
+            if (in_array($fieldName, [$sourceClassField, $baseClassField], true)) {
+                $field->setOption('type', 'keyword');
+            } elseif ($fieldName === $recordIdField) {
+                $field->setOption('type', 'long');
+            }
+
             $property = [
-                'type' => $field['options']['type'] ?? $this->config()->get('default_field_type'),
+                'type' => $field->getOption('type') ?? $this->config()->get('default_field_type'),
             ];
 
             foreach ($validProperties as $propertyName) {
-                if (!isset($field[$propertyName])) {
+                if ($field->getOption($propertyName) === null) {
                     continue;
                 }
 
-                $property[$propertyName] = $field[$propertyName];
+                $property[$propertyName] = $field->getOption($propertyName);
             }
 
             $properties[$fieldName] = $property;
@@ -569,9 +510,10 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
     /**
      * @throws IndexConfigurationException
      */
-    private function validateIndex(string $index): void
+    public function validateIndexConfiguration(string $index): void
     {
-        $validTypes = $this->config()->get('valid_field_types') ?? [];
+        $validTypes = array_filter(array_values($this->config()->get('valid_field_types'))) ?? [];
+
         $map = [];
 
         $classes = $this->getConfiguration()
@@ -579,13 +521,8 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
             ->getClasses();
 
         foreach ($classes as $class) {
-            $classConfig = $this->getConfiguration()
-                ->getIndexConfigurationsForClassName($class);
-
-            $fields = $classConfig[$index]['includeClasses'][$class]['fields'];
-
-            foreach ($fields as $fieldName => $field) {
-                $type = $field['options']['type'] ?? $this->config()->get('default_field_type');
+            foreach ($this->getConfiguration()->getFieldsForClass($class) as $field) {
+                $type = $field->getOption('type') ?? $this->config()->get('default_field_type');
 
                 if (!in_array($type, $validTypes, true)) {
                     throw new IndexConfigurationException(sprintf(
@@ -593,6 +530,8 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
                         $type
                     ));
                 }
+
+                $fieldName = $field->getSearchFieldName();
 
                 $alreadyDefined = $map[$fieldName] ?? null;
 
@@ -613,9 +552,10 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
     }
 
     /**
-     * @param DocumentInterface[] $documents
+     * @throws IndexingServiceException
+     * @throws InvalidArgumentException
      */
-    private function getContentMapForDocuments(array $documents): array
+    protected function getContentMapForDocuments(string $indexSuffix, array $documents): array
     {
         $documentMap = [];
 
@@ -633,7 +573,7 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
             }
 
             try {
-                $fields = $this->getBuilder()->toArray($document);
+                $documentToArray = $this->getBuilder()->toArray($document);
             } catch (IndexConfigurationException $e) {
                 Injector::inst()->get(LoggerInterface::class)->warning(
                     sprintf('Failed to convert document to array: %s', $e->getMessage())
@@ -645,9 +585,18 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
             $indexes = $this->getConfiguration()->getIndexConfigurationsForDocument($document);
 
             if (!$indexes) {
-                Injector::inst()->get(LoggerInterface::class)->warn(
+                Injector::inst()->get(LoggerInterface::class)->warning(
+                    sprintf('No valid indexes found for document %s, skipping...', $document->getIdentifier())
+                );
+
+                continue;
+            }
+
+            if (!in_array($indexSuffix, array_keys($indexes), true)) {
+                Injector::inst()->get(LoggerInterface::class)->warning(
                     sprintf(
-                        'No valid indexes found for document %s, skipping...',
+                        '%s is not a valid index for document %s, skipping...',
+                        $indexSuffix,
                         $document->getIdentifier()
                     )
                 );
@@ -655,15 +604,10 @@ class ElasticsearchService implements IndexingInterface, BatchDocumentInterface
                 continue;
             }
 
-            foreach (array_keys($indexes) as $indexName) {
-                if (!isset($documentMap[$indexName])) {
-                    $documentMap[$indexName] = [];
-                }
-
-                $documentMap[$indexName][] = $fields;
-            }
+            $documentMap[] = $documentToArray;
         }
 
         return $documentMap;
     }
+
 }
